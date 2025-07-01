@@ -364,237 +364,124 @@ class PortfolioManager:
             'portfolio_performance': portfolio_perf
         }
 
-def main():
-    """Fonction principale de l'application"""
+def generate_recommendations(df: pd.DataFrame, concentration: Dict, 
+                           sector_analysis: pd.DataFrame, geo_analysis: pd.DataFrame):
+    """Génère des recommandations personnalisées"""
     
-    # Initialisation du gestionnaire de portefeuille
-    portfolio_manager = PortfolioManager()
+    recommendations = []
     
-    # Header
-    st.title("📊 Analyseur de Portefeuille Professionnel")
-    st.markdown("*Analyse complète avec diversification, concentration et métriques avancées*")
+    # Analyse de concentration
+    if concentration['hhi'] > 0.25:
+        recommendations.append({
+            'type': 'warning',
+            'title': '⚠️ Concentration excessive',
+            'message': f"Votre portefeuille est très concentré (HHI: {concentration['hhi']:.3f}). "
+                      f"Considérez réduire vos 3 plus grosses positions qui représentent "
+                      f"{concentration['top3_concentration']:.1%} du total."
+        })
     
-    # Sidebar pour les actions
-    with st.sidebar:
-        st.header("🔧 Actions")
-        
-        # Upload de fichier
-        uploaded_file = st.file_uploader("📤 Importer un portefeuille CSV", type=["csv"])
-        if uploaded_file:
-            try:
-                df = pd.read_csv(uploaded_file)
-                st.session_state.original_df = df.copy()
-                
-                # Amélioration automatique du DataFrame
-                df = enhance_dataframe(df)
-                st.session_state.portfolio_df = df
-                
-                st.success(f"✅ Portfolio chargé: {len(df)} positions")
-            except Exception as e:
-                st.error(f"Erreur lors du chargement: {e}")
-        
-        # Ajout manuel d'actions
-        st.subheader("➕ Ajouter une action")
-        
-        search_query = st.text_input("🔍 Rechercher (nom ou ticker)", 
-                                   placeholder="ex: Apple, AAPL, LVMH...")
-        
-        if search_query and len(search_query) >= 2:
-            with st.spinner("Recherche en cours..."):
-                search_results = TickerService.search_tickers(search_query)
-            
-            if search_results:
-                options = [f"{r['symbol']} - {r['name']} ({r['exchange']})" 
-                          for r in search_results]
-                
-                selected_option = st.selectbox("Sélectionner une action:", options)
-                
-                if selected_option:
-                    selected_symbol = selected_option.split(" - ")[0]
-                    
-                    # Validation du ticker
-                    with st.spinner("Validation..."):
-                        ticker_data = TickerService.validate_ticker(selected_symbol)
-                    
-                    if ticker_data['valid']:
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.metric("Prix actuel", f"{ticker_data['price']:.2f} {ticker_data['currency']}")
-                        with col2:
-                            st.metric("Secteur", ticker_data['sector'])
-                        
-                        quantity = st.number_input("Quantité", min_value=1, value=1, step=1)
-                        total_cost = quantity * ticker_data['price']
-                        st.info(f"💰 Coût total: {total_cost:.2f} {ticker_data['currency']}")
-                        
-                        if st.button("➕ Ajouter au portefeuille", type="primary"):
-                            if portfolio_manager.add_stock_to_portfolio(ticker_data, quantity):
-                                st.success(f"✅ {ticker_data['name']} ajouté!")
-                                st.rerun()
-                    else:
-                        st.error(f"❌ Erreur: {ticker_data['error']}")
-            else:
-                st.warning("Aucun résultat trouvé")
+    # Analyse sectorielle
+    if not sector_analysis.empty:
+        max_sector = sector_analysis.iloc[0]
+        if max_sector['Weight_Pct'] > 40:
+            recommendations.append({
+                'type': 'warning',
+                'title': '🏭 Concentration sectorielle',
+                'message': f"Le secteur '{max_sector.name}' représente {max_sector['Weight_Pct']:.1f}% "
+                          f"de votre portefeuille. Diversifiez vers d'autres secteurs."
+            })
     
-    # Contenu principal
-    if not st.session_state.portfolio_df.empty:
-        df = st.session_state.portfolio_df
+    # Analyse géographique
+    if not geo_analysis.empty:
+        max_region = geo_analysis.iloc[0]
+        if max_region['Weight_Pct'] > 70:
+            recommendations.append({
+                'type': 'info',
+                'title': '🌍 Diversification géographique',
+                'message': f"Votre exposition à la région '{max_region.name}' est de {max_region['Weight_Pct']:.1f}%. "
+                          f"Considérez une exposition internationale plus large."
+            })
+    
+    # Nombre de positions
+    if len(df) < 10:
+        recommendations.append({
+            'type': 'info',
+            'title': '📊 Nombre de positions',
+            'message': f"Avec {len(df)} positions, votre portefeuille pourrait bénéficier de plus de diversification. "
+                      f"Considérez ajouter 5-10 positions supplémentaires pour réduire le risque spécifique."
+        })
+    elif len(df) > 50:
+        recommendations.append({
+            'type': 'warning',
+            'title': '📊 Trop de positions',
+            'message': f"Avec {len(df)} positions, votre portefeuille pourrait être trop complexe à gérer. "
+                      f"Considérez consolider vers 20-30 positions principales."
+        })
+    
+    # Analyse des performances
+    if 'perf' in df.columns:
+        avg_perf = df['perf'].mean()
+        perf_std = df['perf'].std()
         
-        # Mise à jour des métriques
-        metrics = portfolio_manager.update_portfolio_metrics()
+        if perf_std > 50:  # Volatilité élevée
+            recommendations.append({
+                'type': 'warning',
+                'title': '📈 Volatilité élevée',
+                'message': f"La volatilité de vos positions est élevée (écart-type: {perf_std:.1f}%). "
+                          f"Considérez ajouter des actifs plus stables (obligations, dividendes)."
+            })
         
-        # Overview du portefeuille
-        st.header("📈 Vue d'ensemble du portefeuille")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Valeur totale", f"{metrics['total_value']:,.2f} €")
-        with col2:
-            st.metric("Performance", f"{metrics['portfolio_performance']:.2f}%")
-        with col3:
-            st.metric("Nombre de positions", len(df))
-        with col4:
-            avg_position = metrics['total_value'] / len(df)
-            st.metric("Position moyenne", f"{avg_position:,.2f} €")
-        
-        # DataFrame détaillé
-        st.subheader("📋 Détail des positions")
-        display_df = df[['name', 'symbol', 'quantity', 'buyingPrice', 'lastPrice', 
-                        'amount', 'weight_pct', 'perf', 'sector', 'asset_type']].copy()
-        display_df.columns = ['Nom', 'Ticker', 'Qté', 'Prix Achat', 'Prix Actuel', 
-                             'Montant', 'Poids (%)', 'Perf (%)', 'Secteur', 'Type']
-        
-        st.dataframe(
-            display_df.style.format({
-                'Prix Achat': '{:.2f}',
-                'Prix Actuel': '{:.2f}',
-                'Montant': '{:,.2f}',
-                'Poids (%)': '{:.1f}',
-                'Perf (%)': '{:.2f}'
-            }),
-            use_container_width=True
-        )
-        
-        # Analyses avancées
-        st.header("🔍 Analyses avancées")
-        
-        # Concentration
-        st.subheader("📊 Analyse de concentration")
-        concentration_metrics = DiversificationAnalyzer.calculate_concentration_metrics(df)
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Indice HHI", f"{concentration_metrics['hhi']:.3f}")
-            st.caption("< 0.10: Bien diversifié | > 0.25: Très concentré")
-        with col2:
-            st.metric("Actions effectives", f"{concentration_metrics['effective_stocks']:.1f}")
-            st.caption("Nombre d'actions équivalentes en poids")
-        with col3:
-            st.metric("Top 3 concentration", f"{concentration_metrics['top3_concentration']:.1%}")
-            st.caption("Poids des 3 plus grosses positions")
-        
-        # Niveau de concentration
-        level = concentration_metrics['concentration_level']
-        if level == "Très Concentré":
-            st.error(f"⚠️ Portefeuille {level}")
-        elif level == "Concentré":
-            st.warning(f"⚠️ Portefeuille {level}")
-        else:
-            st.success(f"✅ Portefeuille {level}")
-        
-        # Diversification sectorielle
-        st.subheader("🏭 Diversification sectorielle")
-        sector_analysis = DiversificationAnalyzer.analyze_sector_diversification(df)
-        
-        if not sector_analysis.empty:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                fig_sector = px.pie(sector_analysis, values='Weight_Pct', names=sector_analysis.index,
-                                  title="Répartition sectorielle")
-                fig_sector.update_layout(height=400)
-                st.plotly_chart(fig_sector, use_container_width=True)
-            
-            with col2:
-                st.dataframe(
-                    sector_analysis.style.format({
-                        'Weight_Pct': '{:.1f}%',
-                        'Amount': '{:,.2f}',
-                        'Avg_Performance': '{:.2f}%'
-                    }),
-                    use_container_width=True
-                )
-        
-        # Diversification géographique
-        st.subheader("🌍 Diversification géographique")
-        geo_analysis = DiversificationAnalyzer.analyze_geographic_diversification(df)
-        
-        if not geo_analysis.empty:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                fig_geo = px.bar(geo_analysis, x=geo_analysis.index, y='Weight_Pct',
-                               title="Exposition géographique")
-                fig_geo.update_layout(height=400, xaxis_title="Région", yaxis_title="Poids (%)")
-                st.plotly_chart(fig_geo, use_container_width=True)
-            
-            with col2:
-                st.dataframe(
-                    geo_analysis.style.format({
-                        'Weight_Pct': '{:.1f}%',
-                        'Amount': '{:,.2f}',
-                        'Avg_Performance': '{:.2f}%'
-                    }),
-                    use_container_width=True
-                )
-        
-        # Types d'actifs
-        st.subheader("🏷️ Répartition par type d'actif")
-        asset_analysis = df.groupby('asset_type').agg({
-            'weight_pct': 'sum',
-            'amount': 'sum',
-            'perf': 'mean',
-            'name': 'count'
-        }).round(2)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            fig_assets = px.donut(asset_analysis, values='weight_pct', names=asset_analysis.index,
-                                title="Types d'actifs")
-            st.plotly_chart(fig_assets, use_container_width=True)
-        
-        with col2:
-            st.dataframe(
-                asset_analysis.style.format({
-                    'weight_pct': '{:.1f}%',
-                    'amount': '{:,.2f}',
-                    'perf': '{:.2f}%'
-                }),
-                use_container_width=True
-            )
-        
-        # Recommandations
-        st.header("💡 Recommandations")
-        generate_recommendations(df, concentration_metrics, sector_analysis, geo_analysis)
-        
+        # Positions perdantes
+        losing_positions = df[df['perf'] < -20]
+        if len(losing_positions) > len(df) * 0.3:  # Plus de 30% de positions perdantes
+            recommendations.append({
+                'type': 'warning',
+                'title': '📉 Positions perdantes',
+                'message': f"{len(losing_positions)} positions affichent des pertes > 20%. "
+                          f"Évaluez si certaines doivent être soldées pour limiter les pertes."
+            })
+    
+    # Recommandations positives
+    if concentration['hhi'] < 0.10 and len(df) >= 15:
+        recommendations.append({
+            'type': 'success',
+            'title': '✅ Bonne diversification',
+            'message': "Votre portefeuille présente une bonne diversification avec un risque de concentration faible."
+        })
+    
+    if not sector_analysis.empty and len(sector_analysis) >= 5:
+        recommendations.append({
+            'type': 'success',
+            'title': '✅ Diversification sectorielle',
+            'message': f"Excellente diversification avec {len(sector_analysis)} secteurs représentés."
+        })
+    
+    # Affichage des recommandations
+    if recommendations:
+        for rec in recommendations:
+            if rec['type'] == 'warning':
+                st.markdown(f"""
+                <div class="warning-card">
+                    <h4>{rec['title']}</h4>
+                    <p>{rec['message']}</p>
+                </div>
+                """, unsafe_allow_html=True)
+            elif rec['type'] == 'success':
+                st.markdown(f"""
+                <div class="success-card">
+                    <h4>{rec['title']}</h4>
+                    <p>{rec['message']}</p>
+                </div>
+                """, unsafe_allow_html=True)
+            else:  # info
+                st.markdown(f"""
+                <div class="metric-card">
+                    <h4>{rec['title']}</h4>
+                    <p>{rec['message']}</p>
+                </div>
+                """, unsafe_allow_html=True)
     else:
-        # Page d'accueil
-        st.header("👋 Bienvenue!")
-        st.markdown("""
-        ### 🚀 Fonctionnalités principales:
-        
-        - **📤 Import de portefeuille**: Chargez votre fichier CSV
-        - **🔍 Recherche avancée**: Trouvez n'importe quelle action mondiale
-        - **➕ Ajout manuel**: Construisez votre portefeuille titre par titre
-        - **📊 Analyse de concentration**: Mesurez la diversification
-        - **🏭 Diversification sectorielle**: Analysez l'exposition par secteur
-        - **🌍 Répartition géographique**: Visualisez l'exposition mondiale
-        - **🏷️ Types d'actifs**: ETF, actions, crypto, REIT...
-        - **💡 Recommandations**: Conseils personnalisés
-        
-        ### 📋 Format CSV attendu:
-        Colonnes minimum: `name`, `quantity`, `buyingPrice`, `lastPrice`
-        """)
+        st.info("Aucune recommandation spécifique pour le moment.")
 
 def enhance_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """Améliore automatiquement un DataFrame importé"""
@@ -662,41 +549,428 @@ def enhance_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     
     return df_enhanced
 
-def generate_recommendations(df: pd.DataFrame, concentration: Dict, 
-                           sector_analysis: pd.DataFrame, geo_analysis: pd.DataFrame):
-    """Génère des recommandations personnalisées"""
+def display_portfolio_summary(df: pd.DataFrame):
+    """Affiche un résumé avancé du portefeuille"""
+    st.header("📋 Résumé du portefeuille")
     
-    recommendations = []
+    col1, col2 = st.columns(2)
     
-    # Analyse de concentration
-    if concentration['hhi'] > 0.25:
-        recommendations.append({
-            'type': 'warning',
-            'title': '⚠️ Concentration excessive',
-            'message': f"Votre portefeuille est très concentré (HHI: {concentration['hhi']:.3f}). "
-                      f"Considérez réduire vos {3} plus grosses positions qui représentent "
-                      f"{concentration['top3_concentration']:.1%} du total."
+    with col1:
+        st.subheader("🔝 Top 5 positions")
+        top5 = df.nlargest(5, 'weight_pct')[['name', 'weight_pct', 'perf']]
+        top5.columns = ['Action', 'Poids (%)', 'Performance (%)']
+        st.dataframe(top5.style.format({
+            'Poids (%)': '{:.1f}',
+            'Performance (%)': '{:.2f}'
+        }), use_container_width=True)
+    
+    with col2:
+        st.subheader("📉 Plus fortes baisses")
+        worst5 = df.nsmallest(5, 'perf')[['name', 'weight_pct', 'perf']]
+        worst5.columns = ['Action', 'Poids (%)', 'Performance (%)']
+        st.dataframe(worst5.style.format({
+            'Poids (%)': '{:.1f}',
+            'Performance (%)': '{:.2f}'
+        }), use_container_width=True)
+
+def create_risk_analysis(df: pd.DataFrame):
+    """Crée une analyse de risque du portefeuille"""
+    st.subheader("⚠️ Analyse de risque")
+    
+    # Calcul du VaR simplifié (basé sur les performances historiques)
+    if 'perf' in df.columns and len(df) > 0:
+        portfolio_weights = df['weight'].values
+        portfolio_returns = df['perf'].values / 100  # Conversion en décimal
+        
+        # VaR à 95% (approximation)
+        portfolio_return = np.dot(portfolio_weights, portfolio_returns)
+        portfolio_var = np.dot(portfolio_weights**2, portfolio_returns**2)  # Simplification
+        portfolio_vol = np.sqrt(portfolio_var)
+        
+        var_95 = portfolio_return - 1.645 * portfolio_vol  # VaR à 95%
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Rendement attendu", f"{portfolio_return:.2%}")
+        with col2:
+            st.metric("Volatilité estimée", f"{portfolio_vol:.2%}")
+        with col3:
+            st.metric("VaR 95% (approx.)", f"{var_95:.2%}")
+        
+        # Analyse par quintiles de risque
+        df_risk = df.copy()
+        df_risk['risk_score'] = np.abs(df_risk['perf'])  # Score de risque basique
+        df_risk['risk_quintile'] = pd.qcut(df_risk['risk_score'], 5, labels=['Très Faible', 'Faible', 'Moyen', 'Élevé', 'Très Élevé'])
+        
+        risk_analysis = df_risk.groupby('risk_quintile').agg({
+            'weight_pct': 'sum',
+            'amount': 'sum',
+            'name': 'count'
+        }).round(2)
+        
+        st.subheader("📊 Répartition par niveau de risque")
+        fig_risk = px.bar(risk_analysis, x=risk_analysis.index, y='weight_pct',
+                         title="Exposition par niveau de risque (%)")
+        fig_risk.update_layout(height=400, xaxis_title="Niveau de risque", yaxis_title="Poids (%)")
+        st.plotly_chart(fig_risk, use_container_width=True)
+
+def export_portfolio_report(df: pd.DataFrame):
+    """Permet d'exporter un rapport du portefeuille"""
+    st.subheader("📤 Export du rapport")
+    
+    if st.button("📊 Générer rapport CSV"):
+        # Préparation des données d'export
+        export_df = df[['name', 'symbol', 'quantity', 'buyingPrice', 'lastPrice', 
+                       'amount', 'weight_pct', 'perf', 'sector', 'asset_type']].copy()
+        
+        export_df.columns = ['Nom', 'Symbole', 'Quantité', 'Prix_Achat', 'Prix_Actuel',
+                            'Montant', 'Poids_Pct', 'Performance_Pct', 'Secteur', 'Type_Actif']
+        
+        csv = export_df.to_csv(index=False)
+        st.download_button(
+            label="💾 Télécharger CSV",
+            data=csv,
+            file_name=f"portfolio_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv"
+        )
+        
+        st.success("✅ Rapport généré avec succès!")
+def main():
+    """Fonction principale de l'application"""
+    
+    # Initialisation du gestionnaire de portefeuille
+    portfolio_manager = PortfolioManager()
+    
+    # Header
+    st.title("📊 Analyseur de Portefeuille Professionnel")
+    st.markdown("*Analyse complète avec diversification, concentration et métriques avancées*")
+    
+    # Sidebar pour les actions
+    with st.sidebar:
+        st.header("🔧 Actions")
+        
+        # Upload de fichier
+        uploaded_file = st.file_uploader("📤 Importer un portefeuille CSV", type=["csv"])
+        if uploaded_file:
+            try:
+                df = pd.read_csv(uploaded_file)
+                st.session_state.original_df = df.copy()
+                
+                # Amélioration automatique du DataFrame
+                df = enhance_dataframe(df)
+                st.session_state.portfolio_df = df
+                
+                st.success(f"✅ Portfolio chargé: {len(df)} positions")
+            except Exception as e:
+                st.error(f"Erreur lors du chargement: {e}")
+        
+        # Ajout manuel d'actions
+        st.subheader("➕ Ajouter une action")
+        
+        search_query = st.text_input("🔍 Rechercher (nom ou ticker)", 
+                                   placeholder="ex: Apple, AAPL, LVMH...")
+        
+        if search_query and len(search_query) >= 2:
+            with st.spinner("Recherche en cours..."):
+                search_results = TickerService.search_tickers(search_query)
+            
+            if search_results:
+                options = [f"{r['symbol']} - {r['name']} ({r['exchange']})" 
+                          for r in search_results]
+                
+                selected_option = st.selectbox("Sélectionner une action:", options)
+                
+                if selected_option:
+                    selected_symbol = selected_option.split(" - ")[0]
+                    
+                    # Validation du ticker
+                    with st.spinner("Validation..."):
+                        ticker_data = TickerService.validate_ticker(selected_symbol)
+                    
+                    if ticker_data['valid']:
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.write(f"**{ticker_data['name']}**")
+                            st.write(f"Prix: {ticker_data['price']:.2f} {ticker_data['currency']}")
+                            st.write(f"Secteur: {ticker_data.get('sector', 'N/A')}")
+                        
+                        with col2:
+                            quantity = st.number_input("Quantité:", min_value=1, value=1, key=f"qty_{selected_symbol}")
+                            
+                            if st.button("➕ Ajouter", key=f"add_{selected_symbol}"):
+                                success = portfolio_manager.add_stock_to_portfolio(ticker_data, quantity)
+                                if success:
+                                    st.success(f"✅ {ticker_data['name']} ajouté au portefeuille!")
+                                    st.rerun()
+                    else:
+                        st.error(f"❌ Ticker invalide: {ticker_data.get('error', 'Erreur inconnue')}")
+            else:
+                st.warning("Aucun résultat trouvé")
+        
+        # Boutons d'actions sur le portefeuille
+        st.subheader("🛠️ Gestion du portefeuille")
+        
+        if not st.session_state.portfolio_df.empty:
+            if st.button("🔄 Actualiser les prix", use_container_width=True):
+                with st.spinner("Actualisation des prix..."):
+                    df = st.session_state.portfolio_df.copy()
+                    
+                    for idx, row in df.iterrows():
+                        if row['symbol']:
+                            try:
+                                ticker = yf.Ticker(row['symbol'])
+                                current_price = ticker.history(period="1d")['Close'].iloc[-1]
+                                df.at[idx, 'lastPrice'] = current_price
+                                df.at[idx, 'amount'] = row['quantity'] * current_price
+                                df.at[idx, 'variation'] = ((current_price - row['buyingPrice']) / row['buyingPrice']) * 100
+                            except:
+                                continue
+                    
+                    st.session_state.portfolio_df = df
+                    st.success("✅ Prix actualisés!")
+                    st.rerun()
+            
+            if st.button("🗑️ Vider le portefeuille", use_container_width=True):
+                st.session_state.portfolio_df = pd.DataFrame()
+                st.session_state.original_df = pd.DataFrame()
+                st.warning("Portfolio vidé!")
+                st.rerun()
+            
+            # Affichage des statistiques rapides
+            df = st.session_state.portfolio_df
+            total_value = df['amount'].sum()
+            total_positions = len(df)
+            
+            st.markdown("---")
+            st.metric("💰 Valeur totale", f"{total_value:,.2f} EUR")
+            st.metric("📊 Positions", total_positions)
+            
+            if 'perf' in df.columns:
+                weighted_perf = (df['weight'] * df['perf']).sum() if 'weight' in df.columns else df['perf'].mean()
+                st.metric("📈 Performance moyenne", f"{weighted_perf:.2f}%")
+    
+    # Zone principale
+    if st.session_state.portfolio_df.empty:
+        st.info("👆 Commencez par importer un fichier CSV ou ajouter des actions manuellement dans la barre latérale")
+        
+        # Exemple de format CSV
+        st.subheader("📝 Format CSV attendu")
+        example_df = pd.DataFrame({
+            'name': ['Apple Inc.', 'Microsoft Corporation', 'LVMH'],
+            'quantity': [10, 5, 2],
+            'buyingPrice': [150.00, 280.00, 650.00],
+            'lastPrice': [175.00, 310.00, 680.00],
+            'symbol': ['AAPL', 'MSFT', 'MC.PA']
         })
+        st.dataframe(example_df, use_container_width=True)
+        
+        csv_example = example_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Télécharger exemple CSV",
+            data=csv_example,
+            file_name="exemple_portfolio.csv",
+            mime="text/csv"
+        )
     
-    # Analyse sectorielle
-    if not sector_analysis.empty:
-        max_sector = sector_analysis.iloc[0]
-        if max_sector['Weight_Pct'] > 40:
-            recommendations.append({
-                'type': 'warning',
-                'title': '🏭 Concentration sectorielle',
-                'message': f"Le secteur '{max_sector.name}' représente {max_sector['Weight_Pct']:.1f}% "
-                          f"de votre portefeuille. Diversifiez vers d'autres secteurs."
-            })
-    
-    # Analyse géographique
-    if not geo_analysis.empty:
-        max_region = geo_analysis.iloc[0]
-        if max_region['Weight_Pct'] > 70:
-            recommendations.append({
-                'type': 'info',
-                'title': '🌍 Diversification géographique',
-                'message': f"Votre exposition à la région '{max_region.name}' est de {max_region['Weight_Pct']:.1f}%. "
-                          f"Considérez une exposition internationale plus large."
-            })
-    
+    else:
+        df = st.session_state.portfolio_df.copy()
+        
+        # Mise à jour des métriques
+        metrics = portfolio_manager.update_portfolio_metrics()
+        
+        # Onglets principaux
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+            "📊 Vue d'ensemble", 
+            "🎯 Diversification", 
+            "⚖️ Répartition",
+            "📈 Performance", 
+            "⚠️ Analyse de risque",
+            "📤 Export"
+        ])
+        
+        with tab1:
+            # Métriques principales
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("💰 Valeur totale", f"{metrics['total_value']:,.2f} EUR")
+            
+            with col2:
+                st.metric("📊 Nombre de positions", len(df))
+            
+            with col3:
+                if 'perf' in df.columns:
+                    st.metric("📈 Performance globale", f"{metrics['portfolio_performance']:.2f}%")
+                else:
+                    st.metric("📈 Performance globale", "N/A")
+            
+            with col4:
+                best_stock = df.loc[df['perf'].idxmax()] if 'perf' in df.columns and len(df) > 0 else None
+                if best_stock is not None:
+                    st.metric("🏆 Meilleure position", f"{best_stock['perf']:.2f}%", best_stock['name'])
+                else:
+                    st.metric("🏆 Meilleure position", "N/A")
+            
+            # Résumé du portefeuille
+            display_portfolio_summary(df)
+            
+            # Tableau détaillé
+            st.subheader("📋 Détail des positions")
+            
+            # Sélection des colonnes à afficher
+            display_columns = ['name', 'symbol', 'quantity', 'buyingPrice', 'lastPrice', 
+                             'amount', 'weight_pct', 'perf', 'sector', 'asset_type']
+            
+            available_columns = [col for col in display_columns if col in df.columns]
+            df_display = df[available_columns].copy()
+            
+            # Formatage des colonnes
+            column_config = {
+                'name': st.column_config.TextColumn('Nom', width='medium'),
+                'symbol': st.column_config.TextColumn('Symbole', width='small'),
+                'quantity': st.column_config.NumberColumn('Qté', format='%d'),
+                'buyingPrice': st.column_config.NumberColumn('Prix achat', format='%.2f €'),
+                'lastPrice': st.column_config.NumberColumn('Prix actuel', format='%.2f €'),
+                'amount': st.column_config.NumberColumn('Montant', format='%.2f €'),
+                'weight_pct': st.column_config.NumberColumn('Poids (%)', format='%.1f%%'),
+                'perf': st.column_config.NumberColumn('Perf (%)', format='%.2f%%'),
+                'sector': st.column_config.TextColumn('Secteur', width='medium'),
+                'asset_type': st.column_config.TextColumn('Type', width='small')
+            }
+            
+            st.dataframe(df_display, column_config=column_config, use_container_width=True, height=400)
+        
+        with tab2:
+            st.header("🎯 Analyse de diversification")
+            
+            # Calcul des métriques de concentration
+            concentration = DiversificationAnalyzer.calculate_concentration_metrics(df)
+            
+            # Métriques de concentration
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("📊 Indice HHI", f"{concentration['hhi']:.3f}")
+            
+            with col2:
+                st.metric("🔢 Actions effectives", f"{concentration['effective_stocks']:.1f}")
+            
+            with col3:
+                st.metric("🎯 Top 3 concentration", f"{concentration['top3_concentration']:.1%}")
+            
+            with col4:
+                st.metric("📈 Niveau de concentration", concentration['concentration_level'])
+            
+            # Analyses sectorielles et géographiques
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("🏭 Diversification sectorielle")
+                sector_analysis = DiversificationAnalyzer.analyze_sector_diversification(df)
+                
+                if not sector_analysis.empty:
+                    st.dataframe(sector_analysis.style.format({
+                        'Weight_Pct': '{:.1f}%',
+                        'Avg_Performance': '{:.2f}%'
+                    }), use_container_width=True)
+                    
+                    # Graphique secteurs
+                    fig_sector = px.pie(sector_analysis, values='Weight', names=sector_analysis.index,
+                                       title="Répartition sectorielle")
+                    st.plotly_chart(fig_sector, use_container_width=True)
+                else:
+                    st.info("Données sectorielles non disponibles")
+            
+            with col2:
+                st.subheader("🌍 Diversification géographique")
+                geo_analysis = DiversificationAnalyzer.analyze_geographic_diversification(df)
+                
+                if not geo_analysis.empty:
+                    st.dataframe(geo_analysis.style.format({
+                        'Weight_Pct': '{:.1f}%',
+                        'Avg_Performance': '{:.2f}%'
+                    }), use_container_width=True)
+                    
+                    # Graphique géographique
+                    fig_geo = px.pie(geo_analysis, values='Weight', names=geo_analysis.index,
+                                    title="Répartition géographique")
+                    st.plotly_chart(fig_geo, use_container_width=True)
+                else:
+                    st.info("Données géographiques non disponibles")
+            
+            # Recommandations
+            st.subheader("💡 Recommandations de diversification")
+            generate_recommendations(df, concentration, sector_analysis, geo_analysis)
+        
+        with tab3:
+            st.header("⚖️ Répartition du portefeuille")
+            
+            # Graphique en secteurs des positions
+            fig_allocation = px.pie(df, values='weight_pct', names='name',
+                                   title="Répartition par position")
+            fig_allocation.update_traces(textposition='inside', textinfo='percent+label')
+            st.plotly_chart(fig_allocation, use_container_width=True)
+            
+            # Graphique en barres
+            fig_bar = px.bar(df.sort_values('weight_pct', ascending=True).tail(15), 
+                            x='weight_pct', y='name', orientation='h',
+                            title="Top 15 des positions (% du portefeuille)")
+            fig_bar.update_layout(height=600)
+            st.plotly_chart(fig_bar, use_container_width=True)
+            
+            # Répartition par type d'actif
+            if 'asset_type' in df.columns:
+                asset_allocation = df.groupby('asset_type')['weight_pct'].sum().reset_index()
+                fig_asset = px.bar(asset_allocation, x='asset_type', y='weight_pct',
+                                  title="Répartition par type d'actif")
+                st.plotly_chart(fig_asset, use_container_width=True)
+        
+        with tab4:
+            st.header("📈 Analyse de performance")
+            
+            if 'perf' in df.columns:
+                # Distribution des performances
+                fig_perf_dist = px.histogram(df, x='perf', nbins=20,
+                                           title="Distribution des performances (%)")
+                st.plotly_chart(fig_perf_dist, use_container_width=True)
+                
+                # Performance vs poids
+                fig_scatter = px.scatter(df, x='weight_pct', y='perf', 
+                                       size='amount', hover_name='name',
+                                       title="Performance vs Poids dans le portefeuille")
+                fig_scatter.update_layout(
+                    xaxis_title="Poids (%)",
+                    yaxis_title="Performance (%)"
+                )
+                st.plotly_chart(fig_scatter, use_container_width=True)
+                
+                # Top et bottom performers
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.subheader("🏆 Top performers")
+                    top_performers = df.nlargest(5, 'perf')[['name', 'perf', 'weight_pct']]
+                    st.dataframe(top_performers.style.format({
+                        'perf': '{:.2f}%',
+                        'weight_pct': '{:.1f}%'
+                    }), use_container_width=True)
+                
+                with col2:
+                    st.subheader("📉 Underperformers")
+                    underperformers = df.nsmallest(5, 'perf')[['name', 'perf', 'weight_pct']]
+                    st.dataframe(underperformers.style.format({
+                        'perf': '{:.2f}%',
+                        'weight_pct': '{:.1f}%'
+                    }), use_container_width=True)
+            else:
+                st.info("Données de performance non disponibles")
+        
+        with tab5:
+            create_risk_analysis(df)
+        
+        with tab6:
+            export_portfolio_report(df)
+
+if __name__ == "__main__":
+    main()
