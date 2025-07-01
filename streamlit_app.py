@@ -214,7 +214,42 @@ class DiversificationAnalyzer:
     @staticmethod
     def calculate_concentration_metrics(df: pd.DataFrame) -> Dict:
         """Calcule les métriques de concentration"""
+        # Vérifier que les colonnes nécessaires existent
+        if 'weight' not in df.columns:
+            if 'amount' in df.columns:
+                total_value = df['amount'].sum()
+                if total_value > 0:
+                    df = df.copy()
+                    df['weight'] = df['amount'] / total_value
+                else:
+                    return {
+                        'hhi': 0,
+                        'effective_stocks': 0,
+                        'top3_concentration': 0,
+                        'entropy_ratio': 0,
+                        'concentration_level': "Indéterminé"
+                    }
+            else:
+                return {
+                    'hhi': 0,
+                    'effective_stocks': 0,
+                    'top3_concentration': 0,
+                    'entropy_ratio': 0,
+                    'concentration_level': "Indéterminé"
+                }
+        
         weights = df['weight'].values
+        
+        # S'assurer que les poids sont valides
+        weights = weights[weights > 0]  # Exclure les poids zéro ou négatifs
+        if len(weights) == 0:
+            return {
+                'hhi': 0,
+                'effective_stocks': 0,
+                'top3_concentration': 0,
+                'entropy_ratio': 0,
+                'concentration_level': "Indéterminé"
+            }
         
         # Indice Herfindahl-Hirschman
         hhi = np.sum(weights ** 2)
@@ -223,11 +258,13 @@ class DiversificationAnalyzer:
         effective_stocks = 1 / hhi if hhi > 0 else 0
         
         # Top 3 concentration
-        top3_weight = weights[np.argsort(weights)[-3:]].sum()
+        sorted_weights = np.sort(weights)[::-1]  # Tri décroissant
+        top3_weight = sorted_weights[:min(3, len(sorted_weights))].sum()
         
         # Entropy (diversification Shannon)
-        entropy = -np.sum(weights * np.log(weights + 1e-10))
-        max_entropy = -np.log(1/len(weights))
+        weights_clean = weights[weights > 0]  # Éviter log(0)
+        entropy = -np.sum(weights_clean * np.log(weights_clean + 1e-10))
+        max_entropy = -np.log(1/len(weights_clean)) if len(weights_clean) > 0 else 1
         normalized_entropy = entropy / max_entropy if max_entropy > 0 else 0
         
         return {
@@ -253,26 +290,48 @@ class DiversificationAnalyzer:
     @staticmethod
     def analyze_sector_diversification(df: pd.DataFrame) -> pd.DataFrame:
         """Analyse la diversification sectorielle"""
-        if 'sector' not in df.columns:
+        if 'sector' not in df.columns or 'weight' not in df.columns:
             return pd.DataFrame()
         
-        sector_analysis = df.groupby('sector').agg({
-            'weight': 'sum',
-            'amount': 'sum',
-            'perf': 'mean',
-            'name': 'count'
-        }).round(4)
+        # Calculer weight si manquant
+        df_work = df.copy()
+        if 'weight' not in df_work.columns and 'amount' in df_work.columns:
+            total_value = df_work['amount'].sum()
+            if total_value > 0:
+                df_work['weight'] = df_work['amount'] / total_value
+            else:
+                return pd.DataFrame()
         
-        sector_analysis.columns = ['Weight', 'Amount', 'Avg_Performance', 'Count']
-        sector_analysis['Weight_Pct'] = sector_analysis['Weight'] * 100
-        
-        return sector_analysis.sort_values('Weight', ascending=False)
+        try:
+            sector_analysis = df_work.groupby('sector').agg({
+                'weight': 'sum',
+                'amount': 'sum',
+                'perf': 'mean',
+                'name': 'count'
+            }).round(4)
+            
+            sector_analysis.columns = ['Weight', 'Amount', 'Avg_Performance', 'Count']
+            sector_analysis['Weight_Pct'] = sector_analysis['Weight'] * 100
+            
+            return sector_analysis.sort_values('Weight', ascending=False)
+        except Exception as e:
+            st.warning(f"Erreur dans l'analyse sectorielle: {e}")
+            return pd.DataFrame()
     
     @staticmethod
     def analyze_geographic_diversification(df: pd.DataFrame) -> pd.DataFrame:
         """Analyse la diversification géographique"""
-        if 'exchange' not in df.columns:
+        if 'exchange' not in df.columns or 'weight' not in df.columns:
             return pd.DataFrame()
+        
+        # Calculer weight si manquant
+        df_work = df.copy()
+        if 'weight' not in df_work.columns and 'amount' in df_work.columns:
+            total_value = df_work['amount'].sum()
+            if total_value > 0:
+                df_work['weight'] = df_work['amount'] / total_value
+            else:
+                return pd.DataFrame()
         
         # Mapping exchange -> région
         exchange_to_region = {
@@ -283,22 +342,27 @@ class DiversificationAnalyzer:
             'Toronto': 'North America', 'TSX': 'North America'
         }
         
-        df['region'] = df['exchange'].map(
+        df_work['region'] = df_work['exchange'].map(
             lambda x: next((region for exch, region in exchange_to_region.items() 
                           if exch.lower() in str(x).lower()), 'Other')
         )
         
-        geo_analysis = df.groupby('region').agg({
-            'weight': 'sum',
-            'amount': 'sum',
-            'perf': 'mean',
-            'name': 'count'
-        }).round(4)
-        
-        geo_analysis.columns = ['Weight', 'Amount', 'Avg_Performance', 'Count']
-        geo_analysis['Weight_Pct'] = geo_analysis['Weight'] * 100
-        
-        return geo_analysis.sort_values('Weight', ascending=False)
+        try:
+            geo_analysis = df_work.groupby('region').agg({
+                'weight': 'sum',
+                'amount': 'sum',
+                'perf': 'mean',
+                'name': 'count'
+            }).round(4)
+            
+            geo_analysis.columns = ['Weight', 'Amount', 'Avg_Performance', 'Count']
+            geo_analysis['Weight_Pct'] = geo_analysis['Weight'] * 100
+            
+            return geo_analysis.sort_values('Weight', ascending=False)
+        except Exception as e:
+            st.warning(f"Erreur dans l'analyse géographique: {e}")
+            return pd.DataFrame()
+
 
 class PortfolioManager:
     """Gestionnaire principal du portefeuille"""
