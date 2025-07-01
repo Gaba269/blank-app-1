@@ -207,14 +207,48 @@ class TickerService:
                 return value
         
         return 'Stock'
-
 class DiversificationAnalyzer:
     """Analyseur de diversification avancé"""
     
     @staticmethod
     def calculate_concentration_metrics(df: pd.DataFrame) -> Dict:
         """Calcule les métriques de concentration"""
+        # Vérifier que les colonnes nécessaires existent
+        if 'weight' not in df.columns:
+            if 'amount' in df.columns:
+                total_value = df['amount'].sum()
+                if total_value > 0:
+                    df = df.copy()
+                    df['weight'] = df['amount'] / total_value
+                else:
+                    return {
+                        'hhi': 0,
+                        'effective_stocks': 0,
+                        'top3_concentration': 0,
+                        'entropy_ratio': 0,
+                        'concentration_level': "Indéterminé"
+                    }
+            else:
+                return {
+                    'hhi': 0,
+                    'effective_stocks': 0,
+                    'top3_concentration': 0,
+                    'entropy_ratio': 0,
+                    'concentration_level': "Indéterminé"
+                }
+        
         weights = df['weight'].values
+        
+        # S'assurer que les poids sont valides
+        weights = weights[weights > 0]  # Exclure les poids zéro ou négatifs
+        if len(weights) == 0:
+            return {
+                'hhi': 0,
+                'effective_stocks': 0,
+                'top3_concentration': 0,
+                'entropy_ratio': 0,
+                'concentration_level': "Indéterminé"
+            }
         
         # Indice Herfindahl-Hirschman
         hhi = np.sum(weights ** 2)
@@ -223,11 +257,13 @@ class DiversificationAnalyzer:
         effective_stocks = 1 / hhi if hhi > 0 else 0
         
         # Top 3 concentration
-        top3_weight = weights[np.argsort(weights)[-3:]].sum()
+        sorted_weights = np.sort(weights)[::-1]  # Tri décroissant
+        top3_weight = sorted_weights[:min(3, len(sorted_weights))].sum()
         
         # Entropy (diversification Shannon)
-        entropy = -np.sum(weights * np.log(weights + 1e-10))
-        max_entropy = -np.log(1/len(weights))
+        weights_clean = weights[weights > 0]  # Éviter log(0)
+        entropy = -np.sum(weights_clean * np.log(weights_clean + 1e-10))
+        max_entropy = -np.log(1/len(weights_clean)) if len(weights_clean) > 0 else 1
         normalized_entropy = entropy / max_entropy if max_entropy > 0 else 0
         
         return {
@@ -253,26 +289,48 @@ class DiversificationAnalyzer:
     @staticmethod
     def analyze_sector_diversification(df: pd.DataFrame) -> pd.DataFrame:
         """Analyse la diversification sectorielle"""
-        if 'sector' not in df.columns:
+        if 'sector' not in df.columns or 'weight' not in df.columns:
             return pd.DataFrame()
         
-        sector_analysis = df.groupby('sector').agg({
-            'weight': 'sum',
-            'amount': 'sum',
-            'perf': 'mean',
-            'name': 'count'
-        }).round(4)
+        # Calculer weight si manquant
+        df_work = df.copy()
+        if 'weight' not in df_work.columns and 'amount' in df_work.columns:
+            total_value = df_work['amount'].sum()
+            if total_value > 0:
+                df_work['weight'] = df_work['amount'] / total_value
+            else:
+                return pd.DataFrame()
         
-        sector_analysis.columns = ['Weight', 'Amount', 'Avg_Performance', 'Count']
-        sector_analysis['Weight_Pct'] = sector_analysis['Weight'] * 100
-        
-        return sector_analysis.sort_values('Weight', ascending=False)
+        try:
+            sector_analysis = df_work.groupby('sector').agg({
+                'weight': 'sum',
+                'amount': 'sum',
+                'perf': 'mean',
+                'name': 'count'
+            }).round(4)
+            
+            sector_analysis.columns = ['Weight', 'Amount', 'Avg_Performance', 'Count']
+            sector_analysis['Weight_Pct'] = sector_analysis['Weight'] * 100
+            
+            return sector_analysis.sort_values('Weight', ascending=False)
+        except Exception as e:
+            st.warning(f"Erreur dans l'analyse sectorielle: {e}")
+            return pd.DataFrame()
     
     @staticmethod
     def analyze_geographic_diversification(df: pd.DataFrame) -> pd.DataFrame:
         """Analyse la diversification géographique"""
-        if 'exchange' not in df.columns:
+        if 'exchange' not in df.columns or 'weight' not in df.columns:
             return pd.DataFrame()
+        
+        # Calculer weight si manquant
+        df_work = df.copy()
+        if 'weight' not in df_work.columns and 'amount' in df_work.columns:
+            total_value = df_work['amount'].sum()
+            if total_value > 0:
+                df_work['weight'] = df_work['amount'] / total_value
+            else:
+                return pd.DataFrame()
         
         # Mapping exchange -> région
         exchange_to_region = {
@@ -283,22 +341,26 @@ class DiversificationAnalyzer:
             'Toronto': 'North America', 'TSX': 'North America'
         }
         
-        df['region'] = df['exchange'].map(
+        df_work['region'] = df_work['exchange'].map(
             lambda x: next((region for exch, region in exchange_to_region.items() 
                           if exch.lower() in str(x).lower()), 'Other')
         )
         
-        geo_analysis = df.groupby('region').agg({
-            'weight': 'sum',
-            'amount': 'sum',
-            'perf': 'mean',
-            'name': 'count'
-        }).round(4)
-        
-        geo_analysis.columns = ['Weight', 'Amount', 'Avg_Performance', 'Count']
-        geo_analysis['Weight_Pct'] = geo_analysis['Weight'] * 100
-        
-        return geo_analysis.sort_values('Weight', ascending=False)
+        try:
+            geo_analysis = df_work.groupby('region').agg({
+                'weight': 'sum',
+                'amount': 'sum',
+                'perf': 'mean',
+                'name': 'count'
+            }).round(4)
+            
+            geo_analysis.columns = ['Weight', 'Amount', 'Avg_Performance', 'Count']
+            geo_analysis['Weight_Pct'] = geo_analysis['Weight'] * 100
+            
+            return geo_analysis.sort_values('Weight', ascending=False)
+        except Exception as e:
+            st.warning(f"Erreur dans l'analyse géographique: {e}")
+            return pd.DataFrame()
 
 class PortfolioManager:
     """Gestionnaire principal du portefeuille"""
@@ -344,19 +406,42 @@ class PortfolioManager:
     def update_portfolio_metrics(self):
         """Met à jour toutes les métriques du portefeuille"""
         if st.session_state.portfolio_df.empty:
-            return
+            return {'total_value': 0, 'portfolio_performance': 0}
         
-        df = st.session_state.portfolio_df
+        df = st.session_state.portfolio_df.copy()
+        
+        # Vérifier que les colonnes nécessaires existent
+        required_columns = ['amount', 'buyingPrice', 'lastPrice']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            st.error(f"Colonnes manquantes dans le DataFrame: {missing_columns}")
+            return {'total_value': 0, 'portfolio_performance': 0}
         
         # Calculs de base
         total_value = df['amount'].sum()
-        df['weight'] = df['amount'] / total_value
-        df['perf'] = (df['lastPrice'] - df['buyingPrice']) / df['buyingPrice'] * 100
-        df['weight_pct'] = df['weight'] * 100
+        
+        if total_value > 0:
+            df['weight'] = df['amount'] / total_value
+            df['weight_pct'] = df['weight'] * 100
+        else:
+            df['weight'] = 0
+            df['weight_pct'] = 0
+        
+        # Performance avec gestion des erreurs
+        try:
+            df['perf'] = ((df['lastPrice'] - df['buyingPrice']) / df['buyingPrice'] * 100).fillna(0)
+        except Exception as e:
+            st.warning(f"Erreur calcul performance: {e}")
+            df['perf'] = 0
         
         # Performance pondérée
-        portfolio_perf = (df['weight'] * df['perf']).sum()
+        try:
+            portfolio_perf = (df['weight'] * df['perf']).sum()
+        except:
+            portfolio_perf = 0
         
+        # Mise à jour du session state
         st.session_state.portfolio_df = df
         
         return {
@@ -364,24 +449,68 @@ class PortfolioManager:
             'portfolio_performance': portfolio_perf
         }
 
+def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """S'assure que toutes les colonnes requises sont présentes"""
+    df_work = df.copy()
+    
+    # Colonnes obligatoires avec valeurs par défaut
+    required_columns = {
+        'amount': 0.0,
+        'weight': 0.0,
+        'weight_pct': 0.0,
+        'perf': 0.0,
+        'buyingPrice': 0.0,
+        'lastPrice': 0.0,
+        'quantity': 1,
+        'sector': 'Unknown',
+        'exchange': 'Unknown',
+        'asset_type': 'Stock',
+        'name': 'Unknown',
+        'symbol': 'N/A'
+    }
+    
+    for col, default_value in required_columns.items():
+        if col not in df_work.columns:
+            df_work[col] = default_value
+    
+    # Calculs dérivés
+    if df_work['amount'].sum() > 0:
+        total_value = df_work['amount'].sum()
+        df_work['weight'] = df_work['amount'] / total_value
+        df_work['weight_pct'] = df_work['weight'] * 100
+    
+    if 'buyingPrice' in df_work.columns and 'lastPrice' in df_work.columns:
+        try:
+            df_work['perf'] = ((df_work['lastPrice'] - df_work['buyingPrice']) / df_work['buyingPrice'] * 100).fillna(0)
+        except:
+            df_work['perf'] = 0
+    
+    return df_work
+
 def generate_recommendations(df: pd.DataFrame, concentration: Dict, 
                            sector_analysis: pd.DataFrame, geo_analysis: pd.DataFrame):
     """Génère des recommandations personnalisées"""
     
     recommendations = []
     
+    # Vérification de la validité des données
+    if df.empty or concentration.get('hhi', 0) == 0:
+        st.info("Données insuffisantes pour générer des recommandations.")
+        return
+    
     # Analyse de concentration
-    if concentration['hhi'] > 0.25:
+    hhi = concentration.get('hhi', 0)
+    if hhi > 0.25:
         recommendations.append({
             'type': 'warning',
             'title': '⚠️ Concentration excessive',
-            'message': f"Votre portefeuille est très concentré (HHI: {concentration['hhi']:.3f}). "
+            'message': f"Votre portefeuille est très concentré (HHI: {hhi:.3f}). "
                       f"Considérez réduire vos 3 plus grosses positions qui représentent "
-                      f"{concentration['top3_concentration']:.1%} du total."
+                      f"{concentration.get('top3_concentration', 0):.1%} du total."
         })
     
     # Analyse sectorielle
-    if not sector_analysis.empty:
+    if not sector_analysis.empty and len(sector_analysis) > 0:
         max_sector = sector_analysis.iloc[0]
         if max_sector['Weight_Pct'] > 40:
             recommendations.append({
@@ -392,7 +521,7 @@ def generate_recommendations(df: pd.DataFrame, concentration: Dict,
             })
     
     # Analyse géographique
-    if not geo_analysis.empty:
+    if not geo_analysis.empty and len(geo_analysis) > 0:
         max_region = geo_analysis.iloc[0]
         if max_region['Weight_Pct'] > 70:
             recommendations.append({
@@ -419,7 +548,7 @@ def generate_recommendations(df: pd.DataFrame, concentration: Dict,
         })
     
     # Analyse des performances
-    if 'perf' in df.columns:
+    if 'perf' in df.columns and df['perf'].notna().any():
         avg_perf = df['perf'].mean()
         perf_std = df['perf'].std()
         
@@ -442,7 +571,7 @@ def generate_recommendations(df: pd.DataFrame, concentration: Dict,
             })
     
     # Recommandations positives
-    if concentration['hhi'] < 0.10 and len(df) >= 15:
+    if hhi < 0.10 and len(df) >= 15:
         recommendations.append({
             'type': 'success',
             'title': '✅ Bonne diversification',
@@ -483,71 +612,96 @@ def generate_recommendations(df: pd.DataFrame, concentration: Dict,
     else:
         st.info("Aucune recommandation spécifique pour le moment.")
 
-def enhance_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """Améliore automatiquement un DataFrame importé"""
+# Fonction modifiée dans main() pour l'onglet diversification
+def handle_diversification_tab(df):
+    """Gère l'onglet diversification avec gestion d'erreurs améliorée"""
+    st.header("🎯 Analyse de diversification")
     
-    # Colonnes requises avec leurs alias possibles
-    column_mapping = {
-        'name': ['name', 'nom', 'title', 'security', 'instrument'],
-        'quantity': ['quantity', 'qty', 'quantite', 'shares', 'units'],
-        'buyingPrice': ['buyingPrice', 'prix_achat', 'purchase_price', 'cost'],
-        'lastPrice': ['lastPrice', 'prix_actuel', 'current_price', 'market_price'],
-        'isin': ['isin', 'ISIN'],
-        'symbol': ['symbol', 'ticker', 'symbole']
-    }
+    # S'assurer que le DataFrame a les colonnes nécessaires
+    df_work = ensure_required_columns(df)
     
-    # Standardisation des noms de colonnes
-    df_enhanced = df.copy()
-    for standard_col, possible_names in column_mapping.items():
-        for col in df_enhanced.columns:
-            if col.lower() in [name.lower() for name in possible_names]:
-                df_enhanced = df_enhanced.rename(columns={col: standard_col})
-                break
+    # Calcul des métriques de concentration
+    try:
+        concentration = DiversificationAnalyzer.calculate_concentration_metrics(df_work)
+    except Exception as e:
+        st.error(f"Erreur lors du calcul des métriques de concentration: {e}")
+        concentration = {
+            'hhi': 0,
+            'effective_stocks': 0,
+            'top3_concentration': 0,
+            'entropy_ratio': 0,
+            'concentration_level': "Erreur"
+        }
     
-    # Ajout des colonnes manquantes avec des valeurs par défaut
-    required_columns = {
-        'isin': 'Unknown',
-        'symbol': '',
-        'currency': 'EUR',
-        'exchange': 'Unknown',
-        'sector': 'Unknown',
-        'industry': 'Unknown',
-        'asset_type': 'Stock',
-        'intradayVariation': 0.0,
-        'amountVariation': 0.0,
-        'variation': 0.0
-    }
+    # Métriques de concentration
+    col1, col2, col3, col4 = st.columns(4)
     
-    for col, default_value in required_columns.items():
-        if col not in df_enhanced.columns:
-            df_enhanced[col] = default_value
+    with col1:
+        st.metric("📊 Indice HHI", f"{concentration['hhi']:.3f}")
     
-    # Calculs automatiques
-    if 'amount' not in df_enhanced.columns:
-        df_enhanced['amount'] = df_enhanced['quantity'] * df_enhanced['lastPrice']
+    with col2:
+        st.metric("🔢 Actions effectives", f"{concentration['effective_stocks']:.1f}")
     
-    # Enrichissement automatique des symboles manquants
-    if 'symbol' in df_enhanced.columns:
-        for idx, row in df_enhanced.iterrows():
-            if not row['symbol'] or row['symbol'] == '':
-                # Tentative de recherche automatique
-                search_results = TickerService.search_tickers(row['name'], limit=1)
-                if search_results:
-                    df_enhanced.at[idx, 'symbol'] = search_results[0]['symbol']
-                    
-                    # Validation et enrichissement
-                    ticker_data = TickerService.validate_ticker(search_results[0]['symbol'])
-                    if ticker_data['valid']:
-                        df_enhanced.at[idx, 'sector'] = ticker_data.get('sector', 'Unknown')
-                        df_enhanced.at[idx, 'industry'] = ticker_data.get('industry', 'Unknown')
-                        df_enhanced.at[idx, 'asset_type'] = ticker_data.get('type', 'Stock')
-                        df_enhanced.at[idx, 'exchange'] = ticker_data.get('exchange', 'Unknown')
+    with col3:
+        st.metric("🎯 Top 3 concentration", f"{concentration['top3_concentration']:.1%}")
     
-    # Ajout de la colonne Tickers pour compatibilité
-    if 'Tickers' not in df_enhanced.columns and 'symbol' in df_enhanced.columns:
-        df_enhanced['Tickers'] = df_enhanced['symbol']
+    with col4:
+        st.metric("📈 Niveau de concentration", concentration['concentration_level'])
     
-    return df_enhanced
+    # Analyses sectorielles et géographiques
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("🏭 Diversification sectorielle")
+        try:
+            sector_analysis = DiversificationAnalyzer.analyze_sector_diversification(df_work)
+            
+            if not sector_analysis.empty:
+                st.dataframe(sector_analysis.style.format({
+                    'Weight_Pct': '{:.1f}%',
+                    'Avg_Performance': '{:.2f}%'
+                }), use_container_width=True)
+                
+                # Graphique secteurs
+                fig_sector = px.pie(sector_analysis, values='Weight', names=sector_analysis.index,
+                                   title="Répartition sectorielle")
+                st.plotly_chart(fig_sector, use_container_width=True)
+            else:
+                st.info("Données sectorielles non disponibles")
+        except Exception as e:
+            st.error(f"Erreur analyse sectorielle: {e}")
+            sector_analysis = pd.DataFrame()
+    
+    with col2:
+        st.subheader("🌍 Diversification géographique")
+        try:
+            geo_analysis = DiversificationAnalyzer.analyze_geographic_diversification(df_work)
+            
+            if not geo_analysis.empty:
+                st.dataframe(geo_analysis.style.format({
+                    'Weight_Pct': '{:.1f}%',
+                    'Avg_Performance': '{:.2f}%'
+                }), use_container_width=True)
+                
+                # Graphique géographique
+                fig_geo = px.pie(geo_analysis, values='Weight', names=geo_analysis.index,
+                                title="Répartition géographique")
+                st.plotly_chart(fig_geo, use_container_width=True)
+            else:
+                st.info("Données géographiques non disponibles")
+        except Exception as e:
+            st.error(f"Erreur analyse géographique: {e}")
+            geo_analysis = pd.DataFrame()
+    
+    # Recommandations
+    st.subheader("💡 Recommandations de diversification")
+    try:
+        generate_recommendations(df_work, concentration, 
+                               sector_analysis if 'sector_analysis' in locals() else pd.DataFrame(), 
+                               geo_analysis if 'geo_analysis' in locals() else pd.DataFrame())
+    except Exception as e:
+        st.error(f"Erreur génération recommandations: {e}")
+        st.info("Impossible de générer des recommandations pour le moment.")
 
 def display_portfolio_summary(df: pd.DataFrame):
     """Affiche un résumé avancé du portefeuille"""
