@@ -877,6 +877,261 @@ def export_portfolio_report(df: pd.DataFrame):
         )
         
         st.success("✅ Rapport généré avec succès!")
+
+
+def ensure_required_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """S'assure que toutes les colonnes requises sont présentes"""
+    df_work = df.copy()
+    
+    # Colonnes obligatoires avec valeurs par défaut
+    required_columns = {
+        'amount': 0.0,
+        'weight': 0.0,
+        'weight_pct': 0.0,
+        'perf': 0.0,
+        'buyingPrice': 0.0,
+        'lastPrice': 0.0,
+        'quantity': 1,
+        'sector': 'Unknown',
+        'exchange': 'Unknown',
+        'asset_type': 'Stock',
+        'name': 'Unknown',
+        'symbol': 'N/A'
+    }
+    
+    for col, default_value in required_columns.items():
+        if col not in df_work.columns:
+            df_work[col] = default_value
+    
+    # Calculs dérivés
+    if df_work['amount'].sum() > 0:
+        total_value = df_work['amount'].sum()
+        df_work['weight'] = df_work['amount'] / total_value
+        df_work['weight_pct'] = df_work['weight'] * 100
+    
+    if 'buyingPrice' in df_work.columns and 'lastPrice' in df_work.columns:
+        try:
+            df_work['perf'] = ((df_work['lastPrice'] - df_work['buyingPrice']) / df_work['buyingPrice'] * 100).fillna(0)
+        except:
+            df_work['perf'] = 0
+    
+    return df_work
+
+def generate_recommendations(df: pd.DataFrame, concentration: Dict, 
+                           sector_analysis: pd.DataFrame, geo_analysis: pd.DataFrame):
+    """Génère des recommandations personnalisées"""
+    
+    recommendations = []
+    
+    # Vérification de la validité des données
+    if df.empty or concentration.get('hhi', 0) == 0:
+        st.info("Données insuffisantes pour générer des recommandations.")
+        return
+    
+    # Analyse de concentration
+    hhi = concentration.get('hhi', 0)
+    if hhi > 0.25:
+        recommendations.append({
+            'type': 'warning',
+            'title': '⚠️ Concentration excessive',
+            'message': f"Votre portefeuille est très concentré (HHI: {hhi:.3f}). "
+                      f"Considérez réduire vos 3 plus grosses positions qui représentent "
+                      f"{concentration.get('top3_concentration', 0):.1%} du total."
+        })
+    
+    # Analyse sectorielle
+    if not sector_analysis.empty and len(sector_analysis) > 0:
+        max_sector = sector_analysis.iloc[0]
+        if max_sector['Weight_Pct'] > 40:
+            recommendations.append({
+                'type': 'warning',
+                'title': '🏭 Concentration sectorielle',
+                'message': f"Le secteur '{max_sector.name}' représente {max_sector['Weight_Pct']:.1f}% "
+                          f"de votre portefeuille. Diversifiez vers d'autres secteurs."
+            })
+    
+    # Analyse géographique
+    if not geo_analysis.empty and len(geo_analysis) > 0:
+        max_region = geo_analysis.iloc[0]
+        if max_region['Weight_Pct'] > 70:
+            recommendations.append({
+                'type': 'info',
+                'title': '🌍 Diversification géographique',
+                'message': f"Votre exposition à la région '{max_region.name}' est de {max_region['Weight_Pct']:.1f}%. "
+                          f"Considérez une exposition internationale plus large."
+            })
+    
+    # Nombre de positions
+    if len(df) < 10:
+        recommendations.append({
+            'type': 'info',
+            'title': '📊 Nombre de positions',
+            'message': f"Avec {len(df)} positions, votre portefeuille pourrait bénéficier de plus de diversification. "
+                      f"Considérez ajouter 5-10 positions supplémentaires pour réduire le risque spécifique."
+        })
+    elif len(df) > 50:
+        recommendations.append({
+            'type': 'warning',
+            'title': '📊 Trop de positions',
+            'message': f"Avec {len(df)} positions, votre portefeuille pourrait être trop complexe à gérer. "
+                      f"Considérez consolider vers 20-30 positions principales."
+        })
+    
+    # Analyse des performances
+    if 'perf' in df.columns and df['perf'].notna().any():
+        avg_perf = df['perf'].mean()
+        perf_std = df['perf'].std()
+        
+        if perf_std > 50:  # Volatilité élevée
+            recommendations.append({
+                'type': 'warning',
+                'title': '📈 Volatilité élevée',
+                'message': f"La volatilité de vos positions est élevée (écart-type: {perf_std:.1f}%). "
+                          f"Considérez ajouter des actifs plus stables (obligations, dividendes)."
+            })
+        
+        # Positions perdantes
+        losing_positions = df[df['perf'] < -20]
+        if len(losing_positions) > len(df) * 0.3:  # Plus de 30% de positions perdantes
+            recommendations.append({
+                'type': 'warning',
+                'title': '📉 Positions perdantes',
+                'message': f"{len(losing_positions)} positions affichent des pertes > 20%. "
+                          f"Évaluez si certaines doivent être soldées pour limiter les pertes."
+            })
+    
+    # Recommandations positives
+    if hhi < 0.10 and len(df) >= 15:
+        recommendations.append({
+            'type': 'success',
+            'title': '✅ Bonne diversification',
+            'message': "Votre portefeuille présente une bonne diversification avec un risque de concentration faible."
+        })
+    
+    if not sector_analysis.empty and len(sector_analysis) >= 5:
+        recommendations.append({
+            'type': 'success',
+            'title': '✅ Diversification sectorielle',
+            'message': f"Excellente diversification avec {len(sector_analysis)} secteurs représentés."
+        })
+    
+    # Affichage des recommandations
+    if recommendations:
+        for rec in recommendations:
+            if rec['type'] == 'warning':
+                st.markdown(f"""
+                <div class="warning-card">
+                    <h4>{rec['title']}</h4>
+                    <p>{rec['message']}</p>
+                </div>
+                """, unsafe_allow_html=True)
+            elif rec['type'] == 'success':
+                st.markdown(f"""
+                <div class="success-card">
+                    <h4>{rec['title']}</h4>
+                    <p>{rec['message']}</p>
+                </div>
+                """, unsafe_allow_html=True)
+            else:  # info
+                st.markdown(f"""
+                <div class="metric-card">
+                    <h4>{rec['title']}</h4>
+                    <p>{rec['message']}</p>
+                </div>
+                """, unsafe_allow_html=True)
+    else:
+        st.info("Aucune recommandation spécifique pour le moment.")
+
+# Fonction modifiée dans main() pour l'onglet diversification
+def handle_diversification_tab(df):
+    """Gère l'onglet diversification avec gestion d'erreurs améliorée"""
+    st.header("🎯 Analyse de diversification")
+    
+    # S'assurer que le DataFrame a les colonnes nécessaires
+    df_work = ensure_required_columns(df)
+    
+    # Calcul des métriques de concentration
+    try:
+        concentration = DiversificationAnalyzer.calculate_concentration_metrics(df_work)
+    except Exception as e:
+        st.error(f"Erreur lors du calcul des métriques de concentration: {e}")
+        concentration = {
+            'hhi': 0,
+            'effective_stocks': 0,
+            'top3_concentration': 0,
+            'entropy_ratio': 0,
+            'concentration_level': "Erreur"
+        }
+    
+    # Métriques de concentration
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("📊 Indice HHI", f"{concentration['hhi']:.3f}")
+    
+    with col2:
+        st.metric("🔢 Actions effectives", f"{concentration['effective_stocks']:.1f}")
+    
+    with col3:
+        st.metric("🎯 Top 3 concentration", f"{concentration['top3_concentration']:.1%}")
+    
+    with col4:
+        st.metric("📈 Niveau de concentration", concentration['concentration_level'])
+    
+    # Analyses sectorielles et géographiques
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("🏭 Diversification sectorielle")
+        try:
+            sector_analysis = DiversificationAnalyzer.analyze_sector_diversification(df_work)
+            
+            if not sector_analysis.empty:
+                st.dataframe(sector_analysis.style.format({
+                    'Weight_Pct': '{:.1f}%',
+                    'Avg_Performance': '{:.2f}%'
+                }), use_container_width=True)
+                
+                # Graphique secteurs
+                fig_sector = px.pie(sector_analysis, values='Weight', names=sector_analysis.index,
+                                   title="Répartition sectorielle")
+                st.plotly_chart(fig_sector, use_container_width=True)
+            else:
+                st.info("Données sectorielles non disponibles")
+        except Exception as e:
+            st.error(f"Erreur analyse sectorielle: {e}")
+            sector_analysis = pd.DataFrame()
+    
+    with col2:
+        st.subheader("🌍 Diversification géographique")
+        try:
+            geo_analysis = DiversificationAnalyzer.analyze_geographic_diversification(df_work)
+            
+            if not geo_analysis.empty:
+                st.dataframe(geo_analysis.style.format({
+                    'Weight_Pct': '{:.1f}%',
+                    'Avg_Performance': '{:.2f}%'
+                }), use_container_width=True)
+                
+                # Graphique géographique
+                fig_geo = px.pie(geo_analysis, values='Weight', names=geo_analysis.index,
+                                title="Répartition géographique")
+                st.plotly_chart(fig_geo, use_container_width=True)
+            else:
+                st.info("Données géographiques non disponibles")
+        except Exception as e:
+            st.error(f"Erreur analyse géographique: {e}")
+            geo_analysis = pd.DataFrame()
+    
+    # Recommandations
+    st.subheader("💡 Recommandations de diversification")
+    try:
+        generate_recommendations(df_work, concentration, 
+                               sector_analysis if 'sector_analysis' in locals() else pd.DataFrame(), 
+                               geo_analysis if 'geo_analysis' in locals() else pd.DataFrame())
+    except Exception as e:
+        st.error(f"Erreur génération recommandations: {e}")
+        st.info("Impossible de générer des recommandations pour le moment.")
 def main():
     """Fonction principale de l'application"""
     
