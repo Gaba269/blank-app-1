@@ -7,3 +7,5 @@ seaborn
 requests
 scikit-learn
 plotly
+datetime
+typing
