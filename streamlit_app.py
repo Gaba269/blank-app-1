@@ -363,6 +363,160 @@ class DiversificationAnalyzer:
             st.warning(f"Erreur dans l'analyse géographique: {e}")
             return pd.DataFrame()
 
+class DiversificationAnalyzer:
+    """Analyseur de diversification avancé"""
+    
+    @staticmethod
+    def calculate_concentration_metrics(df: pd.DataFrame) -> Dict:
+        """Calcule les métriques de concentration"""
+        # Vérifier que les colonnes nécessaires existent
+        if 'weight' not in df.columns:
+            if 'amount' in df.columns:
+                total_value = df['amount'].sum()
+                if total_value > 0:
+                    df = df.copy()
+                    df['weight'] = df['amount'] / total_value
+                else:
+                    return {
+                        'hhi': 0,
+                        'effective_stocks': 0,
+                        'top3_concentration': 0,
+                        'entropy_ratio': 0,
+                        'concentration_level': "Indéterminé"
+                    }
+            else:
+                return {
+                    'hhi': 0,
+                    'effective_stocks': 0,
+                    'top3_concentration': 0,
+                    'entropy_ratio': 0,
+                    'concentration_level': "Indéterminé"
+                }
+        
+        weights = df['weight'].values
+        
+        # S'assurer que les poids sont valides
+        weights = weights[weights > 0]  # Exclure les poids zéro ou négatifs
+        if len(weights) == 0:
+            return {
+                'hhi': 0,
+                'effective_stocks': 0,
+                'top3_concentration': 0,
+                'entropy_ratio': 0,
+                'concentration_level': "Indéterminé"
+            }
+        
+        # Indice Herfindahl-Hirschman
+        hhi = np.sum(weights ** 2)
+        
+        # Nombre effectif d'actions
+        effective_stocks = 1 / hhi if hhi > 0 else 0
+        
+        # Top 3 concentration
+        sorted_weights = np.sort(weights)[::-1]  # Tri décroissant
+        top3_weight = sorted_weights[:min(3, len(sorted_weights))].sum()
+        
+        # Entropy (diversification Shannon)
+        weights_clean = weights[weights > 0]  # Éviter log(0)
+        entropy = -np.sum(weights_clean * np.log(weights_clean + 1e-10))
+        max_entropy = -np.log(1/len(weights_clean)) if len(weights_clean) > 0 else 1
+        normalized_entropy = entropy / max_entropy if max_entropy > 0 else 0
+        
+        return {
+            'hhi': hhi,
+            'effective_stocks': effective_stocks,
+            'top3_concentration': top3_weight,
+            'entropy_ratio': normalized_entropy,
+            'concentration_level': DiversificationAnalyzer._get_concentration_level(hhi)
+        }
+    
+    @staticmethod
+    def _get_concentration_level(hhi: float) -> str:
+        """Détermine le niveau de concentration"""
+        if hhi > 0.25:
+            return "Très Concentré"
+        elif hhi > 0.15:
+            return "Concentré"
+        elif hhi > 0.10:
+            return "Modérément Concentré"
+        else:
+            return "Bien Diversifié"
+    
+    @staticmethod
+    def analyze_sector_diversification(df: pd.DataFrame) -> pd.DataFrame:
+        """Analyse la diversification sectorielle"""
+        if 'sector' not in df.columns or 'weight' not in df.columns:
+            return pd.DataFrame()
+        
+        # Calculer weight si manquant
+        df_work = df.copy()
+        if 'weight' not in df_work.columns and 'amount' in df_work.columns:
+            total_value = df_work['amount'].sum()
+            if total_value > 0:
+                df_work['weight'] = df_work['amount'] / total_value
+            else:
+                return pd.DataFrame()
+        
+        try:
+            sector_analysis = df_work.groupby('sector').agg({
+                'weight': 'sum',
+                'amount': 'sum',
+                'perf': 'mean',
+                'name': 'count'
+            }).round(4)
+            
+            sector_analysis.columns = ['Weight', 'Amount', 'Avg_Performance', 'Count']
+            sector_analysis['Weight_Pct'] = sector_analysis['Weight'] * 100
+            
+            return sector_analysis.sort_values('Weight', ascending=False)
+        except Exception as e:
+            st.warning(f"Erreur dans l'analyse sectorielle: {e}")
+            return pd.DataFrame()
+    
+    @staticmethod
+    def analyze_geographic_diversification(df: pd.DataFrame) -> pd.DataFrame:
+        """Analyse la diversification géographique"""
+        if 'exchange' not in df.columns or 'weight' not in df.columns:
+            return pd.DataFrame()
+        
+        # Calculer weight si manquant
+        df_work = df.copy()
+        if 'weight' not in df_work.columns and 'amount' in df_work.columns:
+            total_value = df_work['amount'].sum()
+            if total_value > 0:
+                df_work['weight'] = df_work['amount'] / total_value
+            else:
+                return pd.DataFrame()
+        
+        # Mapping exchange -> région
+        exchange_to_region = {
+            'NYSE': 'USA', 'NASDAQ': 'USA', 'NYSEArca': 'USA',
+            'Paris': 'Europe', 'London': 'Europe', 'Frankfurt': 'Europe',
+            'Milan': 'Europe', 'Amsterdam': 'Europe', 'Swiss': 'Europe',
+            'Tokyo': 'Asia', 'Hong Kong': 'Asia', 'Shanghai': 'Asia',
+            'Toronto': 'North America', 'TSX': 'North America'
+        }
+        
+        df_work['region'] = df_work['exchange'].map(
+            lambda x: next((region for exch, region in exchange_to_region.items() 
+                          if exch.lower() in str(x).lower()), 'Other')
+        )
+        
+        try:
+            geo_analysis = df_work.groupby('region').agg({
+                'weight': 'sum',
+                'amount': 'sum',
+                'perf': 'mean',
+                'name': 'count'
+            }).round(4)
+            
+            geo_analysis.columns = ['Weight', 'Amount', 'Avg_Performance', 'Count']
+            geo_analysis['Weight_Pct'] = geo_analysis['Weight'] * 100
+            
+            return geo_analysis.sort_values('Weight', ascending=False)
+        except Exception as e:
+            st.warning(f"Erreur dans l'analyse géographique: {e}")
+            return pd.DataFrame()
 
 class PortfolioManager:
     """Gestionnaire principal du portefeuille"""
@@ -408,25 +562,49 @@ class PortfolioManager:
     def update_portfolio_metrics(self):
         """Met à jour toutes les métriques du portefeuille"""
         if st.session_state.portfolio_df.empty:
-            return
+            return {'total_value': 0, 'portfolio_performance': 0}
         
-        df = st.session_state.portfolio_df
+        df = st.session_state.portfolio_df.copy()
+        
+        # Vérifier que les colonnes nécessaires existent
+        required_columns = ['amount', 'buyingPrice', 'lastPrice']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            st.error(f"Colonnes manquantes dans le DataFrame: {missing_columns}")
+            return {'total_value': 0, 'portfolio_performance': 0}
         
         # Calculs de base
         total_value = df['amount'].sum()
-        df['weight'] = df['amount'] / total_value
-        df['perf'] = (df['lastPrice'] - df['buyingPrice']) / df['buyingPrice'] * 100
-        df['weight_pct'] = df['weight'] * 100
+        
+        if total_value > 0:
+            df['weight'] = df['amount'] / total_value
+            df['weight_pct'] = df['weight'] * 100
+        else:
+            df['weight'] = 0
+            df['weight_pct'] = 0
+        
+        # Performance avec gestion des erreurs
+        try:
+            df['perf'] = ((df['lastPrice'] - df['buyingPrice']) / df['buyingPrice'] * 100).fillna(0)
+        except Exception as e:
+            st.warning(f"Erreur calcul performance: {e}")
+            df['perf'] = 0
         
         # Performance pondérée
-        portfolio_perf = (df['weight'] * df['perf']).sum()
+        try:
+            portfolio_perf = (df['weight'] * df['perf']).sum()
+        except:
+            portfolio_perf = 0
         
+        # Mise à jour du session state
         st.session_state.portfolio_df = df
         
         return {
             'total_value': total_value,
             'portfolio_performance': portfolio_perf
         }
+
 
 def generate_recommendations(df: pd.DataFrame, concentration: Dict, 
                            sector_analysis: pd.DataFrame, geo_analysis: pd.DataFrame):
