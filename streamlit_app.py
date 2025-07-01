@@ -776,8 +776,25 @@ def main():
     else:
         df = st.session_state.portfolio_df.copy()
         
-        # Mise à jour des métriques
-        metrics = portfolio_manager.update_portfolio_metrics()
+        # Mise à jour des métriques avec gestion d'erreurs
+        try:
+            metrics = portfolio_manager.update_portfolio_metrics()
+        except Exception as e:
+            st.error(f"Erreur lors du calcul des métriques: {e}")
+            # Calculs de base en cas d'erreur
+            total_value = df['amount'].sum() if 'amount' in df.columns else 0
+            metrics = {'total_value': total_value, 'portfolio_performance': 0}
+        
+        # S'assurer que les colonnes nécessaires existent
+        if 'weight_pct' not in df.columns and 'amount' in df.columns:
+            total_value = df['amount'].sum()
+            df['weight_pct'] = (df['amount'] / total_value * 100) if total_value > 0 else 0
+        
+        if 'perf' not in df.columns:
+            if 'buyingPrice' in df.columns and 'lastPrice' in df.columns:
+                df['perf'] = ((df['lastPrice'] - df['buyingPrice']) / df['buyingPrice'] * 100).fillna(0)
+            else:
+                df['perf'] = 0
         
         # Onglets principaux
         tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
@@ -794,22 +811,25 @@ def main():
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
-                st.metric("💰 Valeur totale", f"{metrics['total_value']:,.2f} EUR")
+                st.metric("💰 Valeur totale", f"{metrics.get('total_value', 0):,.2f} EUR")
             
             with col2:
                 st.metric("📊 Nombre de positions", len(df))
             
             with col3:
-                if 'perf' in df.columns:
-                    st.metric("📈 Performance globale", f"{metrics['portfolio_performance']:.2f}%")
-                else:
-                    st.metric("📈 Performance globale", "N/A")
+                portfolio_perf = metrics.get('portfolio_performance', 0)
+                st.metric("📈 Performance globale", f"{portfolio_perf:.2f}%")
             
             with col4:
-                best_stock = df.loc[df['perf'].idxmax()] if 'perf' in df.columns and len(df) > 0 else None
-                if best_stock is not None:
-                    st.metric("🏆 Meilleure position", f"{best_stock['perf']:.2f}%", best_stock['name'])
-                else:
+                try:
+                    if len(df) > 0 and 'perf' in df.columns:
+                        best_idx = df['perf'].idxmax()
+                        best_stock = df.loc[best_idx]
+                        st.metric("🏆 Meilleure position", f"{best_stock['perf']:.2f}%", 
+                                best_stock.get('name', 'N/A'))
+                    else:
+                        st.metric("🏆 Meilleure position", "N/A")
+                except:
                     st.metric("🏆 Meilleure position", "N/A")
             
             # Résumé du portefeuille
