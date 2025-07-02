@@ -647,7 +647,7 @@ class TickerService:
     "Ayvens": "ALD.PA",
     "Verallia": "VRLA.PA",
     "FDJ": "FDJ.PA",
-    "Stellantis": "STLA.PA",
+    "Stellantis": "STLA",
     "Technip Energies": "TE.PA",
     "Euroapi": "EAPI.PA",
     "Bitcoin": "BTC",
