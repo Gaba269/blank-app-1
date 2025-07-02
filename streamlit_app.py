@@ -649,7 +649,7 @@ class TickerService:
     "FDJ": "FDJ.PA",
     "Stellantis": "STLA.PA",
     "Technip Energies": "TE.PA",
-    "Euroapi": "EAPI.PA"
+    "Euroapi": "EAPI.PA",
     "Bitcoin": "BTC",
     "Ethereum": "ETH",
     "Tether": "USDT",
