@@ -797,7 +797,7 @@ class TickerService:
         return 'Stock'
 
 class DiversificationAnalyzer:
-    """Analyseur de diversification avancé"""
+    """Analyseur de diversification avancé avec correction géographique"""
     
     @staticmethod
     def calculate_concentration_metrics(df: pd.DataFrame) -> Dict:
@@ -867,25 +867,82 @@ class DiversificationAnalyzer:
     
     @staticmethod
     def analyze_geographic_diversification(df: pd.DataFrame) -> pd.DataFrame:
-        """Analyse la diversification géographique"""
-        if 'exchange' not in df.columns or 'weight' not in df.columns:
+        """Analyse la diversification géographique - VERSION CORRIGÉE"""
+        if 'symbol' not in df.columns or 'weight' not in df.columns:
             return pd.DataFrame()
         
-        # Mapping exchange -> région
-        exchange_to_region = {
-            'NYSE': 'USA', 'NASDAQ': 'USA', 'NYSEArca': 'USA',
-            'Paris': 'Europe', 'London': 'Europe', 'Frankfurt': 'Europe',
-            'Milan': 'Europe', 'Amsterdam': 'Europe', 'Swiss': 'Europe',
-            'Tokyo': 'Asia', 'Hong Kong': 'Asia', 'Shanghai': 'Asia',
-            'Toronto': 'North America', 'TSX': 'North America'
+        # Mapping des suffixes de symboles vers les régions
+        symbol_to_region = {
+            # États-Unis (pas de suffixe ou suffixes US)
+            '': 'USA',
+            '.US': 'USA',
+            
+            # Europe
+            '.PA': 'France',      # Paris
+            '.L': 'UK',           # London
+            '.DE': 'Germany',     # Frankfurt
+            '.MI': 'Italy',       # Milan
+            '.AS': 'Netherlands', # Amsterdam
+            '.SW': 'Switzerland', # Swiss
+            '.MC': 'Spain',       # Madrid
+            '.BR': 'Belgium',     # Brussels
+            '.VI': 'Austria',     # Vienna
+            '.HE': 'Finland',     # Helsinki
+            '.ST': 'Sweden',      # Stockholm
+            '.OL': 'Norway',      # Oslo
+            '.CO': 'Denmark',     # Copenhagen
+            
+            # Asie
+            '.T': 'Japan',        # Tokyo
+            '.HK': 'Hong Kong',   # Hong Kong
+            '.SS': 'China',       # Shanghai
+            '.SZ': 'China',       # Shenzhen
+            '.KS': 'South Korea', # Korea
+            '.SI': 'Singapore',   # Singapore
+            '.AX': 'Australia',   # Australia
+            '.NZ': 'New Zealand', # New Zealand
+            
+            # Amérique du Nord (autres)
+            '.TO': 'Canada',      # Toronto
+            '.V': 'Canada',       # Vancouver
+            
+            # Amérique du Sud
+            '.SA': 'Brazil',      # São Paulo
+            '.MX': 'Mexico',      # Mexico
+            
+            # Autres
+            '.JO': 'South Africa', # Johannesburg
+            '.TA': 'Israel',      # Tel Aviv
         }
         
-        df['region'] = df['exchange'].map(
-            lambda x: next((region for exch, region in exchange_to_region.items() 
-                          if exch.lower() in str(x).lower()), 'Other')
-        )
+        # Fonction pour déterminer la région à partir du symbole
+        def get_region_from_symbol(symbol):
+            if pd.isna(symbol) or symbol == '':
+                return 'Unknown'
+            
+            symbol = str(symbol).upper()
+            
+            # Recherche du suffixe dans le symbole
+            for suffix, region in symbol_to_region.items():
+                if suffix == '':  # Symboles sans suffixe (USA par défaut)
+                    continue
+                elif symbol.endswith(suffix):
+                    return region
+            
+            # Si aucun suffixe trouvé, vérifier quelques patterns spéciaux
+            if any(pattern in symbol for pattern in ['BTC', 'ETH', 'ADA', 'DOT']):
+                return 'Cryptocurrency'
+            elif len(symbol) <= 5 and '.' not in symbol:
+                return 'USA'  # Symboles courts sans suffixe = USA
+            else:
+                return 'Other'
         
-        geo_analysis = df.groupby('region').agg({
+        # Application de la fonction
+        df_copy = df.copy()
+        df_copy['region'] = df_copy['symbol'].apply(get_region_from_symbol)
+        
+        # Regroupement par région
+        geo_analysis = df_copy.groupby('region').agg({
             'weight': 'sum',
             'amount': 'sum',
             'perf': 'mean',
@@ -1190,90 +1247,273 @@ def display_portfolio_summary(df: pd.DataFrame):
             'Performance (%)': '{:.2f}'
         }), use_container_width=True)
 
-def create_risk_analysis(df: pd.DataFrame):
+class RiskPerformanceAnalyzer:
+    """Analyseur avancé de risque et performance"""
+    
+    @staticmethod
+    def calculate_advanced_metrics(df: pd.DataFrame) -> Dict:
+        """Calcule les métriques avancées de risque et performance"""
+        if 'perf' not in df.columns or 'weight' not in df.columns or len(df) == 0:
+            return {
+                'sharpe_ratio': 0,
+                'sortino_ratio': 0,
+                'calmar_ratio': 0,
+                'max_drawdown': 0,
+                'var_95': 0,
+                'cvar_95': 0,
+                'beta': 0,
+                'alpha': 0,
+                'information_ratio': 0,
+                'treynor_ratio': 0
+            }
+        
+        # Conversion des performances en rendements décimaux
+        returns = df['perf'].values / 100
+        weights = df['weight'].values
+        
+        # Rendement du portefeuille
+        portfolio_return = np.sum(weights * returns)
+        
+        # Volatilité du portefeuille (approximation)
+        portfolio_volatility = np.sqrt(np.sum((weights**2) * (returns**2)))
+        
+        # Taux sans risque (approximation 2% annuel)
+        risk_free_rate = 0.02
+        
+        # Sharpe Ratio
+        sharpe_ratio = (portfolio_return - risk_free_rate) / portfolio_volatility if portfolio_volatility > 0 else 0
+        
+        # Sortino Ratio (utilise seulement la volatilité des rendements négatifs)
+        negative_returns = returns[returns < 0]
+        downside_deviation = np.std(negative_returns) if len(negative_returns) > 0 else portfolio_volatility
+        sortino_ratio = (portfolio_return - risk_free_rate) / downside_deviation if downside_deviation > 0 else 0
+        
+        # Maximum Drawdown (approximation basée sur la distribution des rendements)
+        sorted_returns = np.sort(returns)
+        max_drawdown = abs(sorted_returns[0]) if len(sorted_returns) > 0 else 0
+        
+        # Calmar Ratio
+        calmar_ratio = portfolio_return / max_drawdown if max_drawdown > 0 else 0
+        
+        # Value at Risk (VaR) 95%
+        var_95 = np.percentile(returns, 5)
+        
+        # Conditional VaR (CVaR) 95%
+        cvar_95 = np.mean(returns[returns <= var_95]) if len(returns[returns <= var_95]) > 0 else var_95
+        
+        # Beta (approximation vs marché - utilise la volatilité relative)
+        market_volatility = 0.15  # Volatilité de marché approximative
+        beta = portfolio_volatility / market_volatility if market_volatility > 0 else 1
+        
+        # Alpha (Jensen's Alpha)
+        market_return = 0.08  # Rendement de marché approximatif
+        alpha = portfolio_return - (risk_free_rate + beta * (market_return - risk_free_rate))
+        
+        # Information Ratio (approximation)
+        tracking_error = portfolio_volatility * 0.5  # Approximation
+        information_ratio = alpha / tracking_error if tracking_error > 0 else 0
+        
+        # Treynor Ratio
+        treynor_ratio = (portfolio_return - risk_free_rate) / beta if beta > 0 else 0
+        
+        return {
+            'sharpe_ratio': sharpe_ratio,
+            'sortino_ratio': sortino_ratio,
+            'calmar_ratio': calmar_ratio,
+            'max_drawdown': max_drawdown,
+            'var_95': var_95,
+            'cvar_95': cvar_95,
+            'beta': beta,
+            'alpha': alpha,
+            'information_ratio': information_ratio,
+            'treynor_ratio': treynor_ratio,
+            'portfolio_return': portfolio_return,
+            'portfolio_volatility': portfolio_volatility
+        }
+    
+    @staticmethod
+    def get_performance_grade(sharpe_ratio: float, sortino_ratio: float) -> str:
+        """Détermine une note de performance basée sur les ratios"""
+        if sharpe_ratio >= 2.0 and sortino_ratio >= 2.5:
+            return "A+ (Excellent)"
+        elif sharpe_ratio >= 1.5 and sortino_ratio >= 2.0:
+            return "A (Très Bon)"
+        elif sharpe_ratio >= 1.0 and sortino_ratio >= 1.5:
+            return "B+ (Bon)"
+        elif sharpe_ratio >= 0.5 and sortino_ratio >= 1.0:
+            return "B (Acceptable)"
+        elif sharpe_ratio >= 0.0 and sortino_ratio >= 0.5:
+            return "C (Médiocre)"
+        else:
+            return "D (Insuffisant)"
+
+def create_advanced_risk_analysis(df: pd.DataFrame):
     """
-    Performs a comprehensive risk analysis of the portfolio.
-
-    Parameters:
-    - df: DataFrame containing portfolio data with columns 'perf' and 'weight'.
-
-    This function calculates various risk metrics including Value at Risk (VaR),
-    Conditional Value at Risk (CVaR), and performs a risk quintile analysis.
+    Analyse de risque avancée avec nouveaux indicateurs
     """
-
-    st.subheader("⚠️ Risk Analysis")
-
+    st.subheader("⚠️ Analyse de Risque Avancée")
+    
     if 'perf' in df.columns and 'weight' in df.columns and len(df) > 0:
-        portfolio_weights = df['weight'].values
-        portfolio_returns = df['perf'].values / 100  # Convert to decimal
-
-        # Expected Portfolio Return
-        portfolio_return = np.sum(portfolio_weights * portfolio_returns)
-
-        # Portfolio Volatility
-        portfolio_vol = np.sqrt(np.sum((portfolio_weights**2) * (portfolio_returns**2)))
-
-        # Value at Risk (VaR) at 95%
-        var_95 = portfolio_return - 1.645 * portfolio_vol
-
-        # Conditional Value at Risk (CVaR) at 95%
-        # Sort returns and take the worst 5% to calculate the average
-        sorted_returns = np.sort(portfolio_returns)
-        cvar_95 = np.mean(sorted_returns[:int(len(sorted_returns) * 0.05)])
-
-        # Display metrics
+        # Calcul des métriques avancées
+        metrics = RiskPerformanceAnalyzer.calculate_advanced_metrics(df)
+        
+        # Affichage des métriques principales
+        st.markdown("#### 📊 Métriques de Performance")
         col1, col2, col3, col4 = st.columns(4)
+        
         with col1:
-            st.metric("Expected Return", f"{portfolio_return:.2%}")
+            st.metric("Rendement Portfolio", f"{metrics['portfolio_return']:.2%}")
+            st.metric("Sharpe Ratio", f"{metrics['sharpe_ratio']:.3f}")
+        
         with col2:
-            st.metric("Estimated Volatility", f"{portfolio_vol:.2%}")
+            st.metric("Volatilité", f"{metrics['portfolio_volatility']:.2%}")
+            st.metric("Sortino Ratio", f"{metrics['sortino_ratio']:.3f}")
+        
         with col3:
-            st.metric("VaR 95% (approx.)", f"{var_95:.2%}")
+            st.metric("VaR 95%", f"{metrics['var_95']:.2%}")
+            st.metric("CVaR 95%", f"{metrics['cvar_95']:.2%}")
+        
         with col4:
-            st.metric("CVaR 95% (approx.)", f"{cvar_95:.2%}")
-
-        # Risk quintile analysis
+            st.metric("Max Drawdown", f"{metrics['max_drawdown']:.2%}")
+            st.metric("Calmar Ratio", f"{metrics['calmar_ratio']:.3f}")
+        
+        # Métriques supplémentaires
+        st.markdown("#### 📈 Métriques Avancées")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Beta", f"{metrics['beta']:.3f}")
+        with col2:
+            st.metric("Alpha", f"{metrics['alpha']:.3f}")
+        with col3:
+            st.metric("Information Ratio", f"{metrics['information_ratio']:.3f}")
+        with col4:
+            st.metric("Treynor Ratio", f"{metrics['treynor_ratio']:.3f}")
+        
+        # Note de performance
+        performance_grade = RiskPerformanceAnalyzer.get_performance_grade(
+            metrics['sharpe_ratio'], metrics['sortino_ratio']
+        )
+        
+        st.markdown(f"""
+        <div class="metric-card">
+            <h4>🎯 Note de Performance</h4>
+            <h2 style="color: {'green' if 'A' in performance_grade else 'orange' if 'B' in performance_grade else 'red'}">
+                {performance_grade}
+            </h2>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Graphiques de risque
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Distribution des rendements
+            fig_hist = px.histogram(df, x='perf', nbins=20, 
+                                  title="Distribution des Rendements",
+                                  labels={'perf': 'Performance (%)', 'count': 'Nombre d\'actifs'})
+            
+            # Ajout des lignes VaR
+            fig_hist.add_vline(x=metrics['var_95']*100, line_dash="dash", 
+                              line_color="red", annotation_text="VaR 95%")
+            fig_hist.add_vline(x=metrics['cvar_95']*100, line_dash="dash", 
+                              line_color="darkred", annotation_text="CVaR 95%")
+            
+            st.plotly_chart(fig_hist, use_container_width=True)
+        
+        with col2:
+            # Analyse risque-rendement
+            fig_scatter = px.scatter(df, x='perf', y='weight_pct', 
+                                   size='amount', hover_name='name',
+                                   title="Risque vs Poids dans le Portfolio",
+                                   labels={'perf': 'Performance (%)', 'weight_pct': 'Poids (%)'})
+            
+            # Ligne de référence à 0%
+            fig_scatter.add_hline(y=0, line_dash="dash", line_color="gray")
+            fig_scatter.add_vline(x=0, line_dash="dash", line_color="gray")
+            
+            st.plotly_chart(fig_scatter, use_container_width=True)
+        
+        # Analyse des risques par quintiles (version améliorée)
         df_risk = df.copy()
         df_risk['risk_score'] = np.abs(df_risk['perf'])
-
-        if len(df_risk) >= 3:
-            unique_values = df_risk['risk_score'].nunique()
-            if unique_values < 3:
-                st.warning("Insufficient unique values to create bins. Using default values.")
-                df_risk['risk_quintile'] = 'Medium'
-            else:
-                try:
-                    df_risk['risk_quintile'] = pd.qcut(df_risk['risk_score'], 3, labels=['Low', 'Medium', 'High'])
-                except ValueError as e:
-                    st.warning(f"Error creating bins: {e}. Using default values.")
-                    df_risk['risk_quintile'] = 'Medium'
+        
+        if len(df_risk) >= 5:
+            try:
+                df_risk['risk_quintile'] = pd.qcut(df_risk['risk_score'], 5, 
+                                                 labels=['Très Faible', 'Faible', 'Moyen', 'Élevé', 'Très Élevé'])
+            except ValueError:
+                # Si pas assez de valeurs uniques, utiliser des seuils fixes
+                df_risk['risk_quintile'] = pd.cut(df_risk['risk_score'], 
+                                                bins=[0, 5, 10, 20, 50, 100], 
+                                                labels=['Très Faible', 'Faible', 'Moyen', 'Élevé', 'Très Élevé'],
+                                                include_lowest=True)
         else:
-            df_risk['risk_quintile'] = 'Medium'
-
+            df_risk['risk_quintile'] = 'Moyen'
+        
         risk_analysis = df_risk.groupby('risk_quintile').agg({
             'weight': 'sum',
             'amount': 'sum',
             'name': 'count'
-        }).round(2)
-
-        st.subheader("📊 Risk Distribution")
-
-        if len(risk_analysis) > 1:
-            fig_risk = px.bar(risk_analysis, x=risk_analysis.index, y='weight',
-                              title="Risk Exposure by Level (%)",
-                              labels={'weight': 'Weight (%)', 'risk_quintile': 'Risk Level'})
-            fig_risk.update_layout(height=400)
-            st.plotly_chart(fig_risk, use_container_width=True)
-        else:
-            st.info("Not enough data to analyze risk levels")
-
-        # Additional Visualization: Distribution of Returns
-        st.subheader("📈 Distribution of Returns")
-        fig_hist = px.histogram(df, x='perf', nbins=30, title="Distribution of Portfolio Returns")
-        st.plotly_chart(fig_hist, use_container_width=True)
-
+        }).round(3)
+        
+        risk_analysis.columns = ['Poids', 'Montant', 'Nombre']
+        risk_analysis['Poids_Pct'] = risk_analysis['Poids'] * 100
+        
+        st.markdown("#### 📊 Répartition par Niveau de Risque")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.dataframe(risk_analysis.style.format({
+                'Poids': '{:.1%}',
+                'Montant': '{:,.0f}',
+                'Poids_Pct': '{:.1f}%'
+            }))
+        
+        with col2:
+            if len(risk_analysis) > 1:
+                fig_risk = px.pie(risk_analysis, values='Poids_Pct', names=risk_analysis.index,
+                                title="Exposition par Niveau de Risque")
+                st.plotly_chart(fig_risk, use_container_width=True)
+        
+        # Interprétation des métriques
+        st.markdown("#### 📚 Interprétation des Métriques")
+        
+        interpretations = {
+            'sharpe_ratio': {
+                'desc': 'Ratio de Sharpe',
+                'interpretation': 'Mesure le rendement excédentaire par unité de risque. >1.0 = bon, >2.0 = excellent.',
+                'value': metrics['sharpe_ratio']
+            },
+            'sortino_ratio': {
+                'desc': 'Ratio de Sortino',
+                'interpretation': 'Comme Sharpe mais ne pénalise que la volatilité négative. >1.5 = bon.',
+                'value': metrics['sortino_ratio']
+            },
+            'max_drawdown': {
+                'desc': 'Drawdown Maximum',
+                'interpretation': 'Perte maximale potentielle. <10% = faible risque, >20% = risque élevé.',
+                'value': metrics['max_drawdown']
+            },
+            'var_95': {
+                'desc': 'VaR 95%',
+                'interpretation': 'Perte maximale attendue dans 95% des cas sur la période.',
+                'value': metrics['var_95']
+            }
+        }
+        
+        for key, info in interpretations.items():
+            with st.expander(f"ℹ️ {info['desc']}: {info['value']:.3f}"):
+                st.write(info['interpretation'])
+    
     else:
-        st.info("Insufficient data for risk analysis")
+        st.info("Données insuffisantes pour l'analyse de risque avancée")
+
+# Fonction pour remplacer create_risk_analysis dans le code principal
+def create_risk_analysis(df: pd.DataFrame):
+    """Appelle la nouvelle analyse de risque avancée"""
+    create_advanced_risk_analysis(df)
 
 
 def export_portfolio_report(df: pd.DataFrame):
