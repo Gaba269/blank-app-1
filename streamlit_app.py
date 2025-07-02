@@ -214,6 +214,15 @@ class DiversificationAnalyzer:
     @staticmethod
     def calculate_concentration_metrics(df: pd.DataFrame) -> Dict:
         """Calcule les métriques de concentration"""
+        if 'weight' not in df.columns:
+            return {
+                'hhi': 0,
+                'effective_stocks': 0,
+                'top3_concentration': 0,
+                'entropy_ratio': 0,
+                'concentration_level': 'Non calculé'
+            }
+        
         weights = df['weight'].values
         
         # Indice Herfindahl-Hirschman
@@ -253,7 +262,7 @@ class DiversificationAnalyzer:
     @staticmethod
     def analyze_sector_diversification(df: pd.DataFrame) -> pd.DataFrame:
         """Analyse la diversification sectorielle"""
-        if 'sector' not in df.columns:
+        if 'sector' not in df.columns or 'weight' not in df.columns:
             return pd.DataFrame()
         
         sector_analysis = df.groupby('sector').agg({
@@ -271,7 +280,7 @@ class DiversificationAnalyzer:
     @staticmethod
     def analyze_geographic_diversification(df: pd.DataFrame) -> pd.DataFrame:
         """Analyse la diversification géographique"""
-        if 'exchange' not in df.columns:
+        if 'exchange' not in df.columns or 'weight' not in df.columns:
             return pd.DataFrame()
         
         # Mapping exchange -> région
@@ -344,15 +353,23 @@ class PortfolioManager:
     def update_portfolio_metrics(self):
         """Met à jour toutes les métriques du portefeuille"""
         if st.session_state.portfolio_df.empty:
-            return
+            return {'total_value': 0, 'portfolio_performance': 0}
         
         df = st.session_state.portfolio_df
         
         # Calculs de base
         total_value = df['amount'].sum()
-        df['weight'] = df['amount'] / total_value
-        df['perf'] = (df['lastPrice'] - df['buyingPrice']) / df['buyingPrice'] * 100
-        df['weight_pct'] = df['weight'] * 100
+        
+        # Éviter la division par zéro
+        if total_value > 0:
+            df['weight'] = df['amount'] / total_value
+            df['weight_pct'] = df['weight'] * 100
+        else:
+            df['weight'] = 0
+            df['weight_pct'] = 0
+        
+        # Calcul des performances
+        df['perf'] = ((df['lastPrice'] - df['buyingPrice']) / df['buyingPrice'] * 100).fillna(0)
         
         # Performance pondérée
         portfolio_perf = (df['weight'] * df['perf']).sum()
@@ -419,7 +436,7 @@ def generate_recommendations(df: pd.DataFrame, concentration: Dict,
         })
     
     # Analyse des performances
-    if 'perf' in df.columns:
+    if 'perf' in df.columns and len(df) > 0:
         avg_perf = df['perf'].mean()
         perf_std = df['perf'].std()
         
@@ -523,25 +540,28 @@ def enhance_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             df_enhanced[col] = default_value
     
     # Calculs automatiques
-    if 'amount' not in df_enhanced.columns:
+    if 'amount' not in df_enhanced.columns and 'quantity' in df_enhanced.columns and 'lastPrice' in df_enhanced.columns:
         df_enhanced['amount'] = df_enhanced['quantity'] * df_enhanced['lastPrice']
     
     # Enrichissement automatique des symboles manquants
-    if 'symbol' in df_enhanced.columns:
+    if 'symbol' in df_enhanced.columns and 'name' in df_enhanced.columns:
         for idx, row in df_enhanced.iterrows():
             if not row['symbol'] or row['symbol'] == '':
                 # Tentative de recherche automatique
-                search_results = TickerService.search_tickers(row['name'], limit=1)
-                if search_results:
-                    df_enhanced.at[idx, 'symbol'] = search_results[0]['symbol']
-                    
-                    # Validation et enrichissement
-                    ticker_data = TickerService.validate_ticker(search_results[0]['symbol'])
-                    if ticker_data['valid']:
-                        df_enhanced.at[idx, 'sector'] = ticker_data.get('sector', 'Unknown')
-                        df_enhanced.at[idx, 'industry'] = ticker_data.get('industry', 'Unknown')
-                        df_enhanced.at[idx, 'asset_type'] = ticker_data.get('type', 'Stock')
-                        df_enhanced.at[idx, 'exchange'] = ticker_data.get('exchange', 'Unknown')
+                try:
+                    search_results = TickerService.search_tickers(row['name'], limit=1)
+                    if search_results:
+                        df_enhanced.at[idx, 'symbol'] = search_results[0]['symbol']
+                        
+                        # Validation et enrichissement
+                        ticker_data = TickerService.validate_ticker(search_results[0]['symbol'])
+                        if ticker_data['valid']:
+                            df_enhanced.at[idx, 'sector'] = ticker_data.get('sector', 'Unknown')
+                            df_enhanced.at[idx, 'industry'] = ticker_data.get('industry', 'Unknown')
+                            df_enhanced.at[idx, 'asset_type'] = ticker_data.get('type', 'Stock')
+                            df_enhanced.at[idx, 'exchange'] = ticker_data.get('exchange', 'Unknown')
+                except:
+                    continue
     
     # Ajout de la colonne Tickers pour compatibilité
     if 'Tickers' not in df_enhanced.columns and 'symbol' in df_enhanced.columns:
@@ -552,6 +572,12 @@ def enhance_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 def display_portfolio_summary(df: pd.DataFrame):
     """Affiche un résumé avancé du portefeuille"""
     st.header("📋 Résumé du portefeuille")
+    
+    # Vérifier que les colonnes nécessaires existent
+    required_cols = ['name', 'weight_pct', 'perf']
+    if not all(col in df.columns for col in required_cols):
+        st.warning("Certaines données nécessaires manquent pour afficher le résumé complet.")
+        return
     
     col1, col2 = st.columns(2)
     
@@ -578,7 +604,7 @@ def create_risk_analysis(df: pd.DataFrame):
     st.subheader("⚠️ Analyse de risque")
     
     # Calcul du VaR simplifié (basé sur les performances historiques)
-    if 'perf' in df.columns and len(df) > 0:
+    if 'perf' in df.columns and 'weight' in df.columns and len(df) > 0:
         portfolio_weights = df['weight'].values
         portfolio_returns = df['perf'].values / 100  # Conversion en décimal
         
@@ -600,7 +626,11 @@ def create_risk_analysis(df: pd.DataFrame):
         # Analyse par quintiles de risque
         df_risk = df.copy()
         df_risk['risk_score'] = np.abs(df_risk['perf'])  # Score de risque basique
-        df_risk['risk_quintile'] = pd.qcut(df_risk['risk_score'], 5, labels=['Très Faible', 'Faible', 'Moyen', 'Élevé', 'Très Élevé'])
+        
+        if len(df_risk) >= 5:
+            df_risk['risk_quintile'] = pd.qcut(df_risk['risk_score'], 5, labels=['Très Faible', 'Faible', 'Moyen', 'Élevé', 'Très Élevé'])
+        else:
+            df_risk['risk_quintile'] = 'Moyen'  # Valeur par défaut si pas assez de données
         
         risk_analysis = df_risk.groupby('risk_quintile').agg({
             'weight_pct': 'sum',
@@ -609,10 +639,15 @@ def create_risk_analysis(df: pd.DataFrame):
         }).round(2)
         
         st.subheader("📊 Répartition par niveau de risque")
-        fig_risk = px.bar(risk_analysis, x=risk_analysis.index, y='weight_pct',
-                         title="Exposition par niveau de risque (%)")
-        fig_risk.update_layout(height=400, xaxis_title="Niveau de risque", yaxis_title="Poids (%)")
-        st.plotly_chart(fig_risk, use_container_width=True)
+        if len(risk_analysis) > 1:
+            fig_risk = px.bar(risk_analysis, x=risk_analysis.index, y='weight_pct',
+                             title="Exposition par niveau de risque (%)")
+            fig_risk.update_layout(height=400, xaxis_title="Niveau de risque", yaxis_title="Poids (%)")
+            st.plotly_chart(fig_risk, use_container_width=True)
+        else:
+            st.info("Pas assez de données pour analyser les niveaux de risque")
+    else:
+        st.info("Données insuffisantes pour l'analyse de risque")
 
 def export_portfolio_report(df: pd.DataFrame):
     """Permet d'exporter un rapport du portefeuille"""
@@ -620,248 +655,225 @@ def export_portfolio_report(df: pd.DataFrame):
     
     if st.button("📊 Générer rapport CSV"):
         # Préparation des données d'export
-        export_df = df[['name', 'symbol', 'quantity', 'buyingPrice', 'lastPrice', 
-                       'amount', 'weight_pct', 'perf', 'sector', 'asset_type']].copy()
+        export_columns = ['name', 'symbol', 'quantity', 'buyingPrice', 'lastPrice', 
+                         'amount', 'weight_pct', 'perf', 'sector', 'asset_type']
         
-        export_df.columns = ['Nom', 'Symbole', 'Quantité', 'Prix_Achat', 'Prix_Actuel',
-                            'Montant', 'Poids_Pct', 'Performance_Pct', 'Secteur', 'Type_Actif']
+        # Filtrer les colonnes qui existent
+        available_columns = [col for col in export_columns if col in df.columns]
+        export_df = df[available_columns].copy()
+        
+        # Renommer les colonnes pour l'export
+        column_rename = {
+            'name': 'Nom',
+            'symbol': 'Symbole',
+            'quantity': 'Quantité',
+            'buyingPrice': 'Prix_Achat',
+            'lastPrice': 'Prix_Actuel',
+            'amount': 'Montant',
+            'weight_pct': 'Poids_Pct',
+            'perf': 'Performance_Pct',
+            'sector': 'Secteur',
+            'asset_type': 'Type_Actif'
+        }
+        
+        export_df = export_df.rename(columns={k: v for k, v in column_rename.items() if k in export_df.columns})
         
         csv = export_df.to_csv(index=False)
         st.download_button(
             label="💾 Télécharger CSV",
             data=csv,
             file_name=f"portfolio_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv"
+            mime='text/csv'
         )
         
-        st.success("✅ Rapport généré avec succès!")
+        st.success("✅ Rapport CSV généré avec succès!")
+    
+    # Option d'export JSON pour une utilisation programmatique
+    if st.button("📋 Générer rapport JSON"):
+        # Créer un rapport complet avec métadonnées
+        report_data = {
+            'metadata': {
+                'export_date': datetime.now().isoformat(),
+                'total_positions': len(df),
+                'total_value': df['amount'].sum() if 'amount' in df.columns else 0,
+                'portfolio_performance': (df['weight'] * df['perf']).sum() if all(col in df.columns for col in ['weight', 'perf']) else 0
+            },
+            'positions': df.to_dict('records')
+        }
+        
+        json_str = json.dumps(report_data, indent=2, ensure_ascii=False, default=str)
+        st.download_button(
+            label="💾 Télécharger JSON",
+            data=json_str,
+            file_name=f"portfolio_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+            mime='application/json'
+        )
+        
+        st.success("✅ Rapport JSON généré avec succès!")
+    
+    # Aperçu des données d'export
+    with st.expander("👀 Aperçu des données d'export"):
+        if not df.empty:
+            st.dataframe(df.head(10))
+        else:
+            st.info("Aucune donnée de portefeuille disponible")
 
 def main():
-    """Fonction principale de l'application"""
+    """Fonction principale de l'application Streamlit"""
+    
+    st.title("📊 Portfolio Analyzer Pro")
+    st.markdown("### Analysez et optimisez votre portefeuille d'investissement")
     
     # Initialisation du gestionnaire de portefeuille
     portfolio_manager = PortfolioManager()
     
-    # Header
-    st.title("📊 Analyseur de Portefeuille Professionnel")
-    st.markdown("*Analyse complète avec diversification, concentration et métriques avancées*")
-    
-    # Sidebar pour les actions
+    # Sidebar pour les options
     with st.sidebar:
-        st.header("🔧 Actions")
+        st.header("⚙️ Configuration")
+        
+        # Options d'import/export
+        st.subheader("📁 Import/Export")
         
         # Upload de fichier
-        uploaded_file = st.file_uploader("📤 Importer un portefeuille CSV", type=["csv"])
-        if uploaded_file:
+        uploaded_file = st.file_uploader(
+            "Importer un portefeuille",
+            type=['csv', 'xlsx', 'json'],
+            help="Formats supportés: CSV, Excel, JSON"
+        )
+        
+        if uploaded_file is not None:
             try:
-                df = pd.read_csv(uploaded_file)
-                st.session_state.original_df = df.copy()
+                # Lecture du fichier selon son type
+                if uploaded_file.name.endswith('.csv'):
+                    df_imported = pd.read_csv(uploaded_file)
+                elif uploaded_file.name.endswith('.xlsx'):
+                    df_imported = pd.read_excel(uploaded_file)
+                elif uploaded_file.name.endswith('.json'):
+                    json_data = json.load(uploaded_file)
+                    if 'positions' in json_data:
+                        df_imported = pd.DataFrame(json_data['positions'])
+                    else:
+                        df_imported = pd.DataFrame(json_data)
                 
                 # Amélioration automatique du DataFrame
-                df = enhance_dataframe(df)
-                st.session_state.portfolio_df = df
+                df_enhanced = enhance_dataframe(df_imported)
+                st.session_state.portfolio_df = df_enhanced
+                st.session_state.original_df = df_imported.copy()
                 
-                st.success(f"✅ Portfolio chargé: {len(df)} positions")
+                st.success(f"✅ Fichier importé: {len(df_enhanced)} positions")
+                
             except Exception as e:
-                st.error(f"Erreur lors du chargement: {e}")
+                st.error(f"❌ Erreur lors de l'import: {str(e)}")
         
         # Ajout manuel d'actions
         st.subheader("➕ Ajouter une action")
         
-        search_query = st.text_input("🔍 Rechercher (nom ou ticker)", 
-                                   placeholder="ex: Apple, AAPL, LVMH...")
+        # Recherche de ticker
+        search_query = st.text_input("Rechercher un ticker ou nom d'entreprise")
         
-        if search_query and len(search_query) >= 2:
+        if search_query:
             with st.spinner("Recherche en cours..."):
-                search_results = TickerService.search_tickers(search_query)
+                search_results = TickerService.search_tickers(search_query, limit=5)
             
             if search_results:
-                options = [f"{r['symbol']} - {r['name']} ({r['exchange']})" 
-                          for r in search_results]
+                # Sélection du ticker
+                ticker_options = [f"{result['symbol']} - {result['name']}" for result in search_results]
+                selected_ticker_idx = st.selectbox(
+                    "Sélectionner un ticker",
+                    range(len(ticker_options)),
+                    format_func=lambda x: ticker_options[x]
+                )
                 
-                selected_option = st.selectbox("Sélectionner une action:", options)
+                selected_ticker = search_results[selected_ticker_idx]
                 
-                if selected_option:
-                    selected_symbol = selected_option.split(" - ")[0]
+                # Validation du ticker
+                with st.spinner("Validation du ticker..."):
+                    ticker_data = TickerService.validate_ticker(selected_ticker['symbol'])
+                
+                if ticker_data['valid']:
+                    # Affichage des informations du ticker
+                    st.info(f"**{ticker_data['name']}**\nPrix: {ticker_data['price']:.2f} {ticker_data['currency']}")
                     
-                    # Validation du ticker
-                    with st.spinner("Validation..."):
-                        ticker_data = TickerService.validate_ticker(selected_symbol)
+                    # Saisie de la quantité
+                    quantity = st.number_input("Quantité", min_value=1, value=1)
                     
-                    if ticker_data['valid']:
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.write(f"**{ticker_data['name']}**")
-                            st.write(f"Prix: {ticker_data['price']:.2f} {ticker_data['currency']}")
-                            st.write(f"Secteur: {ticker_data.get('sector', 'N/A')}")
-                        
-                        with col2:
-                            quantity = st.number_input("Quantité:", min_value=1, value=1, key=f"qty_{selected_symbol}")
-                            
-                            if st.button("➕ Ajouter", key=f"add_{selected_symbol}"):
-                                success = portfolio_manager.add_stock_to_portfolio(ticker_data, quantity)
-                                if success:
-                                    st.success(f"✅ {ticker_data['name']} ajouté au portefeuille!")
-                                    st.rerun()
-                    else:
-                        st.error(f"❌ Ticker invalide: {ticker_data.get('error', 'Erreur inconnue')}")
+                    if st.button("Ajouter au portefeuille"):
+                        success = portfolio_manager.add_stock_to_portfolio(ticker_data, quantity)
+                        if success:
+                            st.success("✅ Action ajoutée au portefeuille!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Erreur lors de l'ajout")
+                else:
+                    st.error(f"❌ Ticker invalide: {ticker_data.get('error', 'Erreur inconnue')}")
             else:
-                st.warning("Aucun résultat trouvé")
-        
-        # Boutons d'actions sur le portefeuille
-        st.subheader("🛠️ Gestion du portefeuille")
-        
-        if not st.session_state.portfolio_df.empty:
-            if st.button("🔄 Actualiser les prix", use_container_width=True):
-                with st.spinner("Actualisation des prix..."):
-                    df = st.session_state.portfolio_df.copy()
-                    
-                    for idx, row in df.iterrows():
-                        if row['symbol']:
-                            try:
-                                ticker = yf.Ticker(row['symbol'])
-                                current_price = ticker.history(period="1d")['Close'].iloc[-1]
-                                df.at[idx, 'lastPrice'] = current_price
-                                df.at[idx, 'amount'] = row['quantity'] * current_price
-                                df.at[idx, 'variation'] = ((current_price - row['buyingPrice']) / row['buyingPrice']) * 100
-                            except:
-                                continue
-                    
-                    st.session_state.portfolio_df = df
-                    st.success("✅ Prix actualisés!")
-                    st.rerun()
-            
-            if st.button("🗑️ Vider le portefeuille", use_container_width=True):
-                st.session_state.portfolio_df = pd.DataFrame()
-                st.session_state.original_df = pd.DataFrame()
-                st.warning("Portfolio vidé!")
-                st.rerun()
-            
-            # Affichage des statistiques rapides
-            df = st.session_state.portfolio_df
-            total_value = df['amount'].sum()
-            total_positions = len(df)
-            
-            st.markdown("---")
-            st.metric("💰 Valeur totale", f"{total_value:,.2f} EUR")
-            st.metric("📊 Positions", total_positions)
-            
-            if 'perf' in df.columns:
-                weighted_perf = (df['weight'] * df['perf']).sum() if 'weight' in df.columns else df['perf'].mean()
-                st.metric("📈 Performance moyenne", f"{weighted_perf:.2f}%")
+                st.info("Aucun résultat trouvé")
     
-    # Zone principale
-    if st.session_state.portfolio_df.empty:
-        st.info("👆 Commencez par importer un fichier CSV ou ajouter des actions manuellement dans la barre latérale")
-        
-        # Exemple de format CSV
-        st.subheader("📝 Format CSV attendu")
-        example_df = pd.DataFrame({
-            'name': ['Apple Inc.', 'Microsoft Corporation', 'LVMH'],
-            'quantity': [10, 5, 2],
-            'buyingPrice': [150.00, 280.00, 650.00],
-            'lastPrice': [175.00, 310.00, 680.00],
-            'symbol': ['AAPL', 'MSFT', 'MC.PA']
-        })
-        st.dataframe(example_df, use_container_width=True)
-        
-        csv_example = example_df.to_csv(index=False)
-        st.download_button(
-            label="📥 Télécharger exemple CSV",
-            data=csv_example,
-            file_name="exemple_portfolio.csv",
-            mime="text/csv"
-        )
-    
-    else:
-        df = st.session_state.portfolio_df.copy()
+    # Contenu principal
+    if not st.session_state.portfolio_df.empty:
+        df = st.session_state.portfolio_df
         
         # Mise à jour des métriques
         metrics = portfolio_manager.update_portfolio_metrics()
         
-        # Onglets principaux
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        # Métriques principales
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Valeur totale", f"{metrics['total_value']:,.2f} €")
+        with col2:
+            st.metric("Nombre de positions", len(df))
+        with col3:
+            st.metric("Performance globale", f"{metrics['portfolio_performance']:.2f}%")
+        with col4:
+            avg_weight = df['weight_pct'].mean() if 'weight_pct' in df.columns else 0
+            st.metric("Poids moyen", f"{avg_weight:.1f}%")
+        
+        # Onglets pour différentes analyses
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "📊 Vue d'ensemble", 
-            "🎯 Diversification", 
-            "⚖️ Répartition",
-            "📈 Performance", 
-            "⚠️ Analyse de risque",
+            "📈 Diversification", 
+            "⚠️ Analyse de risque", 
+            "🎯 Recommandations", 
             "📤 Export"
         ])
         
         with tab1:
-            # Métriques principales
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.metric("💰 Valeur totale", f"{metrics['total_value']:,.2f} EUR")
-            
-            with col2:
-                st.metric("📊 Nombre de positions", len(df))
-            
-            with col3:
-                if 'perf' in df.columns:
-                    st.metric("📈 Performance globale", f"{metrics['portfolio_performance']:.2f}%")
-                else:
-                    st.metric("📈 Performance globale", "N/A")
-            
-            with col4:
-                best_stock = df.loc[df['perf'].idxmax()] if 'perf' in df.columns and len(df) > 0 else None
-                if best_stock is not None:
-                    st.metric("🏆 Meilleure position", f"{best_stock['perf']:.2f}%", best_stock['name'])
-                else:
-                    st.metric("🏆 Meilleure position", "N/A")
-            
-            # Résumé du portefeuille
             display_portfolio_summary(df)
             
-            # Tableau détaillé
-            st.subheader("📋 Détail des positions")
-            
-            # Sélection des colonnes à afficher
-            display_columns = ['name', 'symbol', 'quantity', 'buyingPrice', 'lastPrice', 
-                             'amount', 'weight_pct', 'perf', 'sector', 'asset_type']
-            
-            available_columns = [col for col in display_columns if col in df.columns]
-            df_display = df[available_columns].copy()
-            
-            # Formatage des colonnes
-            column_config = {
-                'name': st.column_config.TextColumn('Nom', width='medium'),
-                'symbol': st.column_config.TextColumn('Symbole', width='small'),
-                'quantity': st.column_config.NumberColumn('Qté', format='%d'),
-                'buyingPrice': st.column_config.NumberColumn('Prix achat', format='%.2f €'),
-                'lastPrice': st.column_config.NumberColumn('Prix actuel', format='%.2f €'),
-                'amount': st.column_config.NumberColumn('Montant', format='%.2f €'),
-                'weight_pct': st.column_config.NumberColumn('Poids (%)', format='%.1f%%'),
-                'perf': st.column_config.NumberColumn('Perf (%)', format='%.2f%%'),
-                'sector': st.column_config.TextColumn('Secteur', width='medium'),
-                'asset_type': st.column_config.TextColumn('Type', width='small')
-            }
-            
-            st.dataframe(df_display, column_config=column_config, use_container_width=True, height=400)
-        
-        with tab2:
-            st.header("🎯 Analyse de diversification")
-            
-            # Calcul des métriques de concentration
-            concentration = DiversificationAnalyzer.calculate_concentration_metrics(df)
-            
-            # Métriques de concentration
-            col1, col2, col3, col4 = st.columns(4)
+            # Graphiques de répartition
+            col1, col2 = st.columns(2)
             
             with col1:
-                st.metric("📊 Indice HHI", f"{concentration['hhi']:.3f}")
+                if 'weight_pct' in df.columns:
+                    fig_pie = px.pie(df.head(10), values='weight_pct', names='name', 
+                                   title="Répartition par position (Top 10)")
+                    fig_pie.update_layout(height=400)
+                    st.plotly_chart(fig_pie, use_container_width=True)
             
             with col2:
-                st.metric("🔢 Actions effectives", f"{concentration['effective_stocks']:.1f}")
+                if 'asset_type' in df.columns and 'weight_pct' in df.columns:
+                    asset_dist = df.groupby('asset_type')['weight_pct'].sum().reset_index()
+                    fig_asset = px.bar(asset_dist, x='asset_type', y='weight_pct',
+                                     title="Répartition par type d'actif")
+                    fig_asset.update_layout(height=400)
+                    st.plotly_chart(fig_asset, use_container_width=True)
+        
+        with tab2:
+            st.subheader("🎯 Analyse de diversification")
             
+            # Calcul des métriques de concentration
+            concentration_metrics = DiversificationAnalyzer.calculate_concentration_metrics(df)
+            
+            # Affichage des métriques
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Indice HHI", f"{concentration_metrics['hhi']:.3f}")
+            with col2:
+                st.metric("Actions effectives", f"{concentration_metrics['effective_stocks']:.1f}")
             with col3:
-                st.metric("🎯 Top 3 concentration", f"{concentration['top3_concentration']:.1%}")
-            
+                st.metric("Top 3 concentration", f"{concentration_metrics['top3_concentration']:.1%}")
             with col4:
-                st.metric("📈 Niveau de concentration", concentration['concentration_level'])
+                st.metric("Niveau", concentration_metrics['concentration_level'])
             
             # Analyses sectorielles et géographiques
             col1, col2 = st.columns(2)
@@ -869,16 +881,16 @@ def main():
             with col1:
                 st.subheader("🏭 Diversification sectorielle")
                 sector_analysis = DiversificationAnalyzer.analyze_sector_diversification(df)
-                
                 if not sector_analysis.empty:
                     st.dataframe(sector_analysis.style.format({
                         'Weight_Pct': '{:.1f}%',
                         'Avg_Performance': '{:.2f}%'
-                    }), use_container_width=True)
+                    }))
                     
-                    # Graphique secteurs
-                    fig_sector = px.pie(sector_analysis, values='Weight', names=sector_analysis.index,
-                                       title="Répartition sectorielle")
+                    # Graphique sectoriel
+                    fig_sector = px.bar(sector_analysis.head(8), x=sector_analysis.head(8).index, 
+                                      y='Weight_Pct', title="Exposition sectorielle (%)")
+                    fig_sector.update_layout(height=300, xaxis_title="Secteur", yaxis_title="Poids (%)")
                     st.plotly_chart(fig_sector, use_container_width=True)
                 else:
                     st.info("Données sectorielles non disponibles")
@@ -886,92 +898,164 @@ def main():
             with col2:
                 st.subheader("🌍 Diversification géographique")
                 geo_analysis = DiversificationAnalyzer.analyze_geographic_diversification(df)
-                
                 if not geo_analysis.empty:
                     st.dataframe(geo_analysis.style.format({
                         'Weight_Pct': '{:.1f}%',
                         'Avg_Performance': '{:.2f}%'
-                    }), use_container_width=True)
+                    }))
                     
                     # Graphique géographique
-                    fig_geo = px.pie(geo_analysis, values='Weight', names=geo_analysis.index,
-                                    title="Répartition géographique")
+                    fig_geo = px.pie(geo_analysis, values='Weight_Pct', names=geo_analysis.index,
+                                   title="Répartition géographique")
+                    fig_geo.update_layout(height=300)
                     st.plotly_chart(fig_geo, use_container_width=True)
                 else:
                     st.info("Données géographiques non disponibles")
-            
-            # Recommandations
-            st.subheader("💡 Recommandations de diversification")
-            generate_recommendations(df, concentration, sector_analysis, geo_analysis)
         
         with tab3:
-            st.header("⚖️ Répartition du portefeuille")
-            
-            # Graphique en secteurs des positions
-            fig_allocation = px.pie(df, values='weight_pct', names='name',
-                                   title="Répartition par position")
-            fig_allocation.update_traces(textposition='inside', textinfo='percent+label')
-            st.plotly_chart(fig_allocation, use_container_width=True)
-            
-            # Graphique en barres
-            fig_bar = px.bar(df.sort_values('weight_pct', ascending=True).tail(15), 
-                            x='weight_pct', y='name', orientation='h',
-                            title="Top 15 des positions (% du portefeuille)")
-            fig_bar.update_layout(height=600)
-            st.plotly_chart(fig_bar, use_container_width=True)
-            
-            # Répartition par type d'actif
-            if 'asset_type' in df.columns:
-                asset_allocation = df.groupby('asset_type')['weight_pct'].sum().reset_index()
-                fig_asset = px.bar(asset_allocation, x='asset_type', y='weight_pct',
-                                  title="Répartition par type d'actif")
-                st.plotly_chart(fig_asset, use_container_width=True)
-        
-        with tab4:
-            st.header("📈 Analyse de performance")
-            
-            if 'perf' in df.columns:
-                # Distribution des performances
-                fig_perf_dist = px.histogram(df, x='perf', nbins=20,
-                                           title="Distribution des performances (%)")
-                st.plotly_chart(fig_perf_dist, use_container_width=True)
-                
-                # Performance vs poids
-                fig_scatter = px.scatter(df, x='weight_pct', y='perf', 
-                                       size='amount', hover_name='name',
-                                       title="Performance vs Poids dans le portefeuille")
-                fig_scatter.update_layout(
-                    xaxis_title="Poids (%)",
-                    yaxis_title="Performance (%)"
-                )
-                st.plotly_chart(fig_scatter, use_container_width=True)
-                
-                # Top et bottom performers
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.subheader("🏆 Top performers")
-                    top_performers = df.nlargest(5, 'perf')[['name', 'perf', 'weight_pct']]
-                    st.dataframe(top_performers.style.format({
-                        'perf': '{:.2f}%',
-                        'weight_pct': '{:.1f}%'
-                    }), use_container_width=True)
-                
-                with col2:
-                    st.subheader("📉 Underperformers")
-                    underperformers = df.nsmallest(5, 'perf')[['name', 'perf', 'weight_pct']]
-                    st.dataframe(underperformers.style.format({
-                        'perf': '{:.2f}%',
-                        'weight_pct': '{:.1f}%'
-                    }), use_container_width=True)
-            else:
-                st.info("Données de performance non disponibles")
-        
-        with tab5:
             create_risk_analysis(df)
         
-        with tab6:
+        with tab4:
+            st.subheader("🎯 Recommandations personnalisées")
+            
+            # Calcul des analyses nécessaires pour les recommandations
+            concentration_metrics = DiversificationAnalyzer.calculate_concentration_metrics(df)
+            sector_analysis = DiversificationAnalyzer.analyze_sector_diversification(df)
+            geo_analysis = DiversificationAnalyzer.analyze_geographic_diversification(df)
+            
+            # Génération des recommandations
+            generate_recommendations(df, concentration_metrics, sector_analysis, geo_analysis)
+        
+        with tab5:
             export_portfolio_report(df)
+        
+        # Tableau détaillé du portefeuille
+        st.subheader("📋 Détail du portefeuille")
+        
+        # Colonnes à afficher
+        display_columns = ['name', 'symbol', 'quantity', 'buyingPrice', 'lastPrice', 
+                          'amount', 'weight_pct', 'perf', 'sector']
+        available_display_columns = [col for col in display_columns if col in df.columns]
+        
+        if available_display_columns:
+            # Formatage du DataFrame pour l'affichage
+            df_display = df[available_display_columns].copy()
+            
+            # Renommage des colonnes pour l'affichage
+            column_names = {
+                'name': 'Nom',
+                'symbol': 'Symbole',
+                'quantity': 'Quantité',
+                'buyingPrice': 'Prix d\'achat',
+                'lastPrice': 'Prix actuel',
+                'amount': 'Montant (€)',
+                'weight_pct': 'Poids (%)',
+                'perf': 'Performance (%)',
+                'sector': 'Secteur'
+            }
+            
+            df_display = df_display.rename(columns={k: v for k, v in column_names.items() if k in df_display.columns})
+            
+            # Application du style conditionnel
+            def color_performance(val):
+                try:
+                    if val > 0:
+                        return 'color: green'
+                    elif val < 0:
+                        return 'color: red'
+                    else:
+                        return 'color: black'
+                except:
+                    return 'color: black'
+            
+            # Formatage des nombres
+            format_dict = {}
+            if 'Prix d\'achat' in df_display.columns:
+                format_dict['Prix d\'achat'] = '{:.2f}'
+            if 'Prix actuel' in df_display.columns:
+                format_dict['Prix actuel'] = '{:.2f}'
+            if 'Montant (€)' in df_display.columns:
+                format_dict['Montant (€)'] = '{:,.2f}'
+            if 'Poids (%)' in df_display.columns:
+                format_dict['Poids (%)'] = '{:.1f}'
+            if 'Performance (%)' in df_display.columns:
+                format_dict['Performance (%)'] = '{:.2f}'
+            
+            styled_df = df_display.style.format(format_dict)
+            
+            # Application du style conditionnel sur la performance si elle existe
+            if 'Performance (%)' in df_display.columns:
+                styled_df = styled_df.applymap(color_performance, subset=['Performance (%)'])
+            
+            st.dataframe(styled_df, use_container_width=True, height=400)
+        else:
+            st.dataframe(df, use_container_width=True, height=400)
+        
+        # Option de suppression de positions
+        st.subheader("🗑️ Gestion des positions")
+        
+        if len(df) > 0:
+            position_to_delete = st.selectbox(
+                "Sélectionner une position à supprimer",
+                range(len(df)),
+                format_func=lambda x: f"{df.iloc[x]['name']} ({df.iloc[x].get('symbol', 'N/A')})"
+            )
+            
+            col1, col2 = st.columns([1, 4])
+            with col1:
+                if st.button("🗑️ Supprimer", type="secondary"):
+                    st.session_state.portfolio_df = st.session_state.portfolio_df.drop(
+                        st.session_state.portfolio_df.index[position_to_delete]
+                    ).reset_index(drop=True)
+                    st.success("Position supprimée!")
+                    st.rerun()
+            
+            with col2:
+                if st.button("🔄 Actualiser les prix", type="primary"):
+                    with st.spinner("Actualisation des prix en cours..."):
+                        updated_count = 0
+                        for idx, row in st.session_state.portfolio_df.iterrows():
+                            if 'symbol' in row and row['symbol']:
+                                try:
+                                    ticker_data = TickerService.validate_ticker(row['symbol'])
+                                    if ticker_data['valid']:
+                                        st.session_state.portfolio_df.at[idx, 'lastPrice'] = ticker_data['price']
+                                        updated_count += 1
+                                except:
+                                    continue
+                        
+                        if updated_count > 0:
+                            # Recalcul des métriques après mise à jour
+                            portfolio_manager.update_portfolio_metrics()
+                            st.success(f"✅ {updated_count} prix mis à jour!")
+                            st.rerun()
+                        else:
+                            st.warning("Aucun prix n'a pu être mis à jour")
+    
+    else:
+        # Écran d'accueil si pas de portefeuille
+        st.info("🚀 Commencez par importer un portefeuille ou ajouter des actions via la barre latérale.")
+        
+        # Exemple de format de fichier
+        with st.expander("📄 Format de fichier d'import"):
+            st.markdown("""
+            **Colonnes requises/recommandées pour l'import CSV/Excel:**
+            
+            - `name` ou `nom`: Nom de l'entreprise/action
+            - `symbol` ou `ticker`: Symbole boursier (ex: AAPL, MC.PA)
+            - `quantity` ou `quantite`: Nombre d'actions détenues
+            - `buyingPrice` ou `prix_achat`: Prix d'achat unitaire
+            - `lastPrice` ou `prix_actuel`: Prix actuel (optionnel, sera actualisé automatiquement)
+            - `isin`: Code ISIN (optionnel)
+            
+            **Exemple:**
+            ```
+            name,symbol,quantity,buyingPrice
+            Apple Inc,AAPL,10,150.00
+            LVMH,MC.PA,5,650.00
+            Microsoft,MSFT,8,280.00
+            ```
+            """)
 
 if __name__ == "__main__":
     main()
