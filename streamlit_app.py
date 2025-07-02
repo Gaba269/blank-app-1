@@ -1360,172 +1360,171 @@ class RiskPerformanceAnalyzer:
         else:
             return "D (Insuffisant)"
 
-def create_advanced_risk_analysis(df: pd.DataFrame, ticker_data: Dict):
+def create_advanced_risk_analysis(df: pd.DataFrame, ticker_data: Optional[List[Dict]] = None):
     """
     Analyse de risque avancée avec nouveaux indicateurs
     """
-    # Ajouter les symboles au DataFrame
-    if 'symbol' not in df.columns and ticker_data:
+    # Vérification que df est un DataFrame valide
+    if not isinstance(df, pd.DataFrame):
+        st.error("L'argument df doit être un DataFrame pandas.")
+        return
+
+    # Ajouter les symboles au DataFrame si ticker_data est fourni
+    if ticker_data:
+        if 'symbol' not in df.columns:
+            df['symbol'] = ''
         df['symbol'] = [ticker['symbol'] for ticker in ticker_data]
 
     st.subheader("⚠️ Analyse de Risque Avancée")
 
-    if 'perf' in df.columns and 'weight' in df.columns and len(df) > 0:
-        # Calcul des métriques avancées
-        metrics = RiskPerformanceAnalyzer.calculate_advanced_metrics(df)
+    # Vérification des colonnes nécessaires
+    required_columns = ['perf', 'weight']
+    if not all(col in df.columns for col in required_columns):
+        st.error(f"Les colonnes suivantes sont manquantes dans le DataFrame : {required_columns}")
+        return
 
-        # Affichage des métriques principales
-        st.markdown("#### 📊 Métriques de Performance")
-        col1, col2, col3, col4 = st.columns(4)
+    if len(df) > 0:
+        try:
+            # Calcul des métriques avancées
+            metrics = RiskPerformanceAnalyzer.calculate_advanced_metrics(df)
 
-        with col1:
-            st.metric("Rendement Portfolio", f"{metrics['portfolio_return']:.2%}")
-            st.metric("Sharpe Ratio", f"{metrics['sharpe_ratio']:.3f}")
+            # Affichage des métriques principales
+            st.markdown("#### 📊 Métriques de Performance")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Rendement Portfolio", f"{metrics['portfolio_return']:.2%}")
+                st.metric("Sharpe Ratio", f"{metrics['sharpe_ratio']:.3f}")
+            with col2:
+                st.metric("Volatilité", f"{metrics['portfolio_volatility']:.2%}")
+                st.metric("Sortino Ratio", f"{metrics['sortino_ratio']:.3f}")
+            with col3:
+                st.metric("VaR 95%", f"{metrics['var_95']:.2%}")
+                st.metric("CVaR 95%", f"{metrics['cvar_95']:.2%}")
+            with col4:
+                st.metric("Max Drawdown", f"{metrics['max_drawdown']:.2%}")
+                st.metric("Calmar Ratio", f"{metrics['calmar_ratio']:.3f}")
 
-        with col2:
-            st.metric("Volatilité", f"{metrics['portfolio_volatility']:.2%}")
-            st.metric("Sortino Ratio", f"{metrics['sortino_ratio']:.3f}")
+            # Métriques supplémentaires
+            st.markdown("#### 📈 Métriques Avancées")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Beta", f"{metrics['beta']:.3f}")
+            with col2:
+                st.metric("Alpha", f"{metrics['alpha']:.3f}")
+            with col3:
+                st.metric("Information Ratio", f"{metrics['information_ratio']:.3f}")
+            with col4:
+                st.metric("Treynor Ratio", f"{metrics['treynor_ratio']:.3f}")
 
-        with col3:
-            st.metric("VaR 95%", f"{metrics['var_95']:.2%}")
-            st.metric("CVaR 95%", f"{metrics['cvar_95']:.2%}")
+            # Note de performance
+            performance_grade = RiskPerformanceAnalyzer.get_performance_grade(
+                metrics['sharpe_ratio'], metrics['sortino_ratio']
+            )
+            st.markdown(f"""
+            <div class="metric-card">
+                <h4>🎯 Note de Performance</h4>
+                <h2 style="color: {'green' if 'A' in performance_grade else 'orange' if 'B' in performance_grade else 'red'}">
+                    {performance_grade}
+                </h2>
+            </div>
+            """, unsafe_allow_html=True)
 
-        with col4:
-            st.metric("Max Drawdown", f"{metrics['max_drawdown']:.2%}")
-            st.metric("Calmar Ratio", f"{metrics['calmar_ratio']:.3f}")
+            # Graphiques de risque
+            col1, col2 = st.columns(2)
+            with col1:
+                # Distribution des rendements
+                fig_hist = px.histogram(df, x='perf', nbins=20,
+                                      title="Distribution des Rendements",
+                                      labels={'perf': 'Performance (%)', 'count': 'Nombre d\'actifs'})
+                # Ajout des lignes VaR
+                fig_hist.add_vline(x=metrics['var_95']*100, line_dash="dash",
+                                  line_color="red", annotation_text="VaR 95%")
+                fig_hist.add_vline(x=metrics['cvar_95']*100, line_dash="dash",
+                                  line_color="darkred", annotation_text="CVaR 95%")
+                st.plotly_chart(fig_hist, use_container_width=True)
 
-        # Métriques supplémentaires
-        st.markdown("#### 📈 Métriques Avancées")
-        col1, col2, col3, col4 = st.columns(4)
+            with col2:
+                # Analyse risque-rendement
+                fig_scatter = px.scatter(df, x='perf', y='weight',
+                                       size='amount', hover_name='name',
+                                       title="Risque vs Poids dans le Portfolio",
+                                       labels={'perf': 'Performance (%)', 'weight': 'Poids (%)'})
+                # Ligne de référence à 0%
+                fig_scatter.add_hline(y=0, line_dash="dash", line_color="gray")
+                fig_scatter.add_vline(x=0, line_dash="dash", line_color="gray")
+                st.plotly_chart(fig_scatter, use_container_width=True)
 
-        with col1:
-            st.metric("Beta", f"{metrics['beta']:.3f}")
-        with col2:
-            st.metric("Alpha", f"{metrics['alpha']:.3f}")
-        with col3:
-            st.metric("Information Ratio", f"{metrics['information_ratio']:.3f}")
-        with col4:
-            st.metric("Treynor Ratio", f"{metrics['treynor_ratio']:.3f}")
+            # Analyse des risques par quintiles
+            df_risk = df.copy()
+            df_risk['risk_score'] = np.abs(df_risk['perf'])
+            if len(df_risk) >= 5:
+                try:
+                    df_risk['risk_quintile'] = pd.qcut(df_risk['risk_score'], 5,
+                                                     labels=['Très Faible', 'Faible', 'Moyen', 'Élevé', 'Très Élevé'])
+                except ValueError:
+                    # Si pas assez de valeurs uniques, utiliser des seuils fixes
+                    df_risk['risk_quintile'] = pd.cut(df_risk['risk_score'],
+                                                    bins=[0, 5, 10, 20, 50, 100],
+                                                    labels=['Très Faible', 'Faible', 'Moyen', 'Élevé', 'Très Élevé'],
+                                                    include_lowest=True)
+            else:
+                df_risk['risk_quintile'] = 'Moyen'
 
-        # Note de performance
-        performance_grade = RiskPerformanceAnalyzer.get_performance_grade(
-            metrics['sharpe_ratio'], metrics['sortino_ratio']
-        )
+            risk_analysis = df_risk.groupby('risk_quintile').agg({
+                'weight': 'sum',
+                'amount': 'sum',
+                'name': 'count'
+            }).round(3)
+            risk_analysis.columns = ['Poids', 'Montant', 'Nombre']
+            risk_analysis['Poids_Pct'] = risk_analysis['Poids'] * 100
 
-        st.markdown(f"""
-        <div class="metric-card">
-            <h4>🎯 Note de Performance</h4>
-            <h2 style="color: {'green' if 'A' in performance_grade else 'orange' if 'B' in performance_grade else 'red'}">
-                {performance_grade}
-            </h2>
-        </div>
-        """, unsafe_allow_html=True)
+            st.markdown("#### 📊 Répartition par Niveau de Risque")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.dataframe(risk_analysis.style.format({
+                    'Poids': '{:.1%}',
+                    'Montant': '{:,.0f}',
+                    'Poids_Pct': '{:.1f}%'
+                }))
+            with col2:
+                if len(risk_analysis) > 1:
+                    fig_risk = px.pie(risk_analysis, values='Poids_Pct', names=risk_analysis.index,
+                                    title="Exposition par Niveau de Risque")
+                    st.plotly_chart(fig_risk, use_container_width=True)
 
-        # Graphiques de risque
-        col1, col2 = st.columns(2)
-
-        with col1:
-            # Distribution des rendements
-            fig_hist = px.histogram(df, x='perf', nbins=20,
-                                  title="Distribution des Rendements",
-                                  labels={'perf': 'Performance (%)', 'count': 'Nombre d\'actifs'})
-
-            # Ajout des lignes VaR
-            fig_hist.add_vline(x=metrics['var_95']*100, line_dash="dash",
-                              line_color="red", annotation_text="VaR 95%")
-            fig_hist.add_vline(x=metrics['cvar_95']*100, line_dash="dash",
-                              line_color="darkred", annotation_text="CVaR 95%")
-
-            st.plotly_chart(fig_hist, use_container_width=True)
-
-        with col2:
-            # Analyse risque-rendement
-            fig_scatter = px.scatter(df, x='perf', y='weight',
-                                   size='amount', hover_name='name',
-                                   title="Risque vs Poids dans le Portfolio",
-                                   labels={'perf': 'Performance (%)', 'weight': 'Poids (%)'})
-
-            # Ligne de référence à 0%
-            fig_scatter.add_hline(y=0, line_dash="dash", line_color="gray")
-            fig_scatter.add_vline(x=0, line_dash="dash", line_color="gray")
-
-            st.plotly_chart(fig_scatter, use_container_width=True)
-
-        # Analyse des risques par quintiles (version améliorée)
-        df_risk = df.copy()
-        df_risk['risk_score'] = np.abs(df_risk['perf'])
-
-        if len(df_risk) >= 5:
-            try:
-                df_risk['risk_quintile'] = pd.qcut(df_risk['risk_score'], 5,
-                                                 labels=['Très Faible', 'Faible', 'Moyen', 'Élevé', 'Très Élevé'])
-            except ValueError:
-                # Si pas assez de valeurs uniques, utiliser des seuils fixes
-                df_risk['risk_quintile'] = pd.cut(df_risk['risk_score'],
-                                                bins=[0, 5, 10, 20, 50, 100],
-                                                labels=['Très Faible', 'Faible', 'Moyen', 'Élevé', 'Très Élevé'],
-                                                include_lowest=True)
-        else:
-            df_risk['risk_quintile'] = 'Moyen'
-
-        risk_analysis = df_risk.groupby('risk_quintile').agg({
-            'weight': 'sum',
-            'amount': 'sum',
-            'name': 'count'
-        }).round(3)
-
-        risk_analysis.columns = ['Poids', 'Montant', 'Nombre']
-        risk_analysis['Poids_Pct'] = risk_analysis['Poids'] * 100
-
-        st.markdown("#### 📊 Répartition par Niveau de Risque")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.dataframe(risk_analysis.style.format({
-                'Poids': '{:.1%}',
-                'Montant': '{:,.0f}',
-                'Poids_Pct': '{:.1f}%'
-            }))
-
-        with col2:
-            if len(risk_analysis) > 1:
-                fig_risk = px.pie(risk_analysis, values='Poids_Pct', names=risk_analysis.index,
-                                title="Exposition par Niveau de Risque")
-                st.plotly_chart(fig_risk, use_container_width=True)
-
-        # Interprétation des métriques
-        st.markdown("#### 📚 Interprétation des Métriques")
-
-        interpretations = {
-            'sharpe_ratio': {
-                'desc': 'Ratio de Sharpe',
-                'interpretation': 'Mesure le rendement excédentaire par unité de risque. >1.0 = bon, >2.0 = excellent.',
-                'value': metrics['sharpe_ratio']
-            },
-            'sortino_ratio': {
-                'desc': 'Ratio de Sortino',
-                'interpretation': 'Comme Sharpe mais ne pénalise que la volatilité négative. >1.5 = bon.',
-                'value': metrics['sortino_ratio']
-            },
-            'max_drawdown': {
-                'desc': 'Drawdown Maximum',
-                'interpretation': 'Perte maximale potentielle. <10% = faible risque, >20% = risque élevé.',
-                'value': metrics['max_drawdown']
-            },
-            'var_95': {
-                'desc': 'VaR 95%',
-                'interpretation': 'Perte maximale attendue dans 95% des cas sur la période.',
-                'value': metrics['var_95']
+            # Interprétation des métriques
+            st.markdown("#### 📚 Interprétation des Métriques")
+            interpretations = {
+                'sharpe_ratio': {
+                    'desc': 'Ratio de Sharpe',
+                    'interpretation': 'Mesure le rendement excédentaire par unité de risque. >1.0 = bon, >2.0 = excellent.',
+                    'value': metrics['sharpe_ratio']
+                },
+                'sortino_ratio': {
+                    'desc': 'Ratio de Sortino',
+                    'interpretation': 'Comme Sharpe mais ne pénalise que la volatilité négative. >1.5 = bon.',
+                    'value': metrics['sortino_ratio']
+                },
+                'max_drawdown': {
+                    'desc': 'Drawdown Maximum',
+                    'interpretation': 'Perte maximale potentielle. <10% = faible risque, >20% = risque élevé.',
+                    'value': metrics['max_drawdown']
+                },
+                'var_95': {
+                    'desc': 'VaR 95%',
+                    'interpretation': 'Perte maximale attendue dans 95% des cas sur la période.',
+                    'value': metrics['var_95']
+                }
             }
-        }
+            for key, info in interpretations.items():
+                with st.expander(f"ℹ️ {info['desc']}: {info['value']:.3f}"):
+                    st.write(info['interpretation'])
 
-        for key, info in interpretations.items():
-            with st.expander(f"ℹ️ {info['desc']}: {info['value']:.3f}"):
-                st.write(info['interpretation'])
-
+        except Exception as e:
+            st.error(f"Une erreur est survenue lors de l'analyse de risque avancée : {str(e)}")
     else:
         st.info("Données insuffisantes pour l'analyse de risque avancée")
+
 # Fonction pour remplacer create_risk_analysis dans le code principal
 def create_risk_analysis(df: pd.DataFrame):
     """Appelle la nouvelle analyse de risque avancée"""
