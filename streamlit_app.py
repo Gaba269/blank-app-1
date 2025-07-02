@@ -557,7 +557,7 @@ class TickerService:
     "Sanofi": "SAN.PA",
     "Vivendi": "VIV.PA",
     "TotalEnergies SE": "TTE.PA",
-    "STMicroelectronics": "STM.PA",
+    "STMicroelectronics": "STM",
     "Vinci": "DG.PA",
     "Renault": "RNO.PA",
     "Veolia Environnement": "VIE.PA",
