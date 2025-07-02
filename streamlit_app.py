@@ -318,24 +318,27 @@ class PortfolioManager:
         if 'original_df' not in st.session_state:
             st.session_state.original_df = pd.DataFrame()
     
-    def add_stock_to_portfolio(self, ticker_data: Dict, quantity: int):
-        """Ajoute une action au portefeuille"""
+    def add_stock_to_portfolio(self, ticker_data: Dict, quantity: int, buying_price: float = None):
+        """Ajoute une action au portefeuille avec prix d'achat personnalisable"""
+        # Utilise le prix d'achat fourni ou le prix actuel par défaut
+        purchase_price = buying_price if buying_price is not None else ticker_data['price']
+        
         new_row = {
             'name': ticker_data['name'],
             'symbol': ticker_data['symbol'],
             'isin': ticker_data.get('isin', 'Unknown'),
             'quantity': quantity,
-            'buyingPrice': ticker_data['price'],
-            'lastPrice': ticker_data['price'],
+            'buyingPrice': purchase_price,  # Prix d'achat personnalisé ou actuel
+            'lastPrice': ticker_data['price'],  # Prix actuel du marché
             'currency': ticker_data.get('currency', 'USD'),
             'exchange': ticker_data.get('exchange', 'Unknown'),
             'sector': ticker_data.get('sector', 'Unknown'),
             'industry': ticker_data.get('industry', 'Unknown'),
             'asset_type': ticker_data.get('type', 'Stock'),
             'intradayVariation': 0.0,
-            'amount': quantity * ticker_data['price'],
-            'amountVariation': 0.0,
-            'variation': 0.0,
+            'amount': quantity * ticker_data['price'],  # Valeur actuelle
+            'amountVariation': quantity * (ticker_data['price'] - purchase_price),  # Plus/moins-value
+            'variation': ((ticker_data['price'] - purchase_price) / purchase_price * 100) if purchase_price > 0 else 0.0,
             'Tickers': ticker_data['symbol']  # Pour compatibilité
         }
         
@@ -767,6 +770,7 @@ def main():
         
         # Ajout manuel d'actions
         st.subheader("➕ Ajouter une action")
+    
         
         # Recherche de ticker
         search_query = st.text_input("Rechercher un ticker ou nom d'entreprise")
@@ -792,13 +796,62 @@ def main():
                 
                 if ticker_data['valid']:
                     # Affichage des informations du ticker
-                    st.info(f"**{ticker_data['name']}**\nPrix: {ticker_data['price']:.2f} {ticker_data['currency']}")
+                    st.info(f"**{ticker_data['name']}**\nPrix actuel: {ticker_data['price']:.2f} {ticker_data['currency']}")
                     
                     # Saisie de la quantité
                     quantity = st.number_input("Quantité", min_value=1, value=1)
                     
+                    # NOUVELLE SECTION : Choix du prix d'achat
+                    st.markdown("**Prix d'achat:**")
+                    price_option = st.radio(
+                        "Choisir le prix d'achat",
+                        ["Prix actuel", "Prix personnalisé"],
+                        key="price_option"
+                    )
+                    
+                    buying_price = None
+                    if price_option == "Prix actuel":
+                        buying_price = ticker_data['price']
+                        st.success(f"✅ Prix d'achat: {buying_price:.2f} {ticker_data['currency']} (prix actuel)")
+                    else:
+                        buying_price = st.number_input(
+                            f"Prix d'achat personnalisé ({ticker_data['currency']})",
+                            min_value=0.01,
+                            value=ticker_data['price'],
+                            step=0.01,
+                            format="%.2f"
+                        )
+                        
+                        # Calcul et affichage de la plus/moins-value potentielle
+                        if buying_price != ticker_data['price']:
+                            pnl_per_share = ticker_data['price'] - buying_price
+                            pnl_total = pnl_per_share * quantity
+                            pnl_percent = (pnl_per_share / buying_price * 100) if buying_price > 0 else 0
+                            
+                            if pnl_per_share > 0:
+                                st.success(f"📈 Plus-value: +{pnl_total:.2f} {ticker_data['currency']} ({pnl_percent:+.2f}%)")
+                            elif pnl_per_share < 0:
+                                st.error(f"📉 Moins-value: {pnl_total:.2f} {ticker_data['currency']} ({pnl_percent:+.2f}%)")
+                            else:
+                                st.info("➡️ Aucune plus/moins-value")
+                    
+                    # Résumé de l'ajout
+                    with st.expander("📋 Résumé de l'ajout"):
+                        total_cost = buying_price * quantity
+                        current_value = ticker_data['price'] * quantity
+                        st.write(f"**Quantité:** {quantity}")
+                        st.write(f"**Prix d'achat unitaire:** {buying_price:.2f} {ticker_data['currency']}")
+                        st.write(f"**Prix actuel unitaire:** {ticker_data['price']:.2f} {ticker_data['currency']}")
+                        st.write(f"**Coût total d'achat:** {total_cost:.2f} {ticker_data['currency']}")
+                        st.write(f"**Valeur actuelle:** {current_value:.2f} {ticker_data['currency']}")
+                        
+                        pnl = current_value - total_cost
+                        if pnl != 0:
+                            pnl_color = "green" if pnl > 0 else "red"
+                            st.markdown(f"**Plus/Moins-value:** <span style='color: {pnl_color}'>{pnl:+.2f} {ticker_data['currency']}</span>", unsafe_allow_html=True)
+                    
                     if st.button("Ajouter au portefeuille"):
-                        success = portfolio_manager.add_stock_to_portfolio(ticker_data, quantity)
+                        success = portfolio_manager.add_stock_to_portfolio(ticker_data, quantity, buying_price)
                         if success:
                             st.success("✅ Action ajoutée au portefeuille!")
                             st.rerun()
@@ -808,7 +861,6 @@ def main():
                     st.error(f"❌ Ticker invalide: {ticker_data.get('error', 'Erreur inconnue')}")
             else:
                 st.info("Aucun résultat trouvé")
-    
     # Contenu principal
     if not st.session_state.portfolio_df.empty:
         df = st.session_state.portfolio_df
