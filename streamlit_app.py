@@ -1253,7 +1253,7 @@ class RiskPerformanceAnalyzer:
     @staticmethod
     def calculate_advanced_metrics(df: pd.DataFrame) -> Dict:
         """Calcule les métriques avancées de risque et performance"""
-        if 'perf' not in df.columns or 'weight' not in df.columns or len(df) == 0:
+        if len(df) == 0:
             return {
                 'sharpe_ratio': 0,
                 'sortino_ratio': 0,
