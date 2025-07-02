@@ -1191,64 +1191,89 @@ def display_portfolio_summary(df: pd.DataFrame):
         }), use_container_width=True)
 
 def create_risk_analysis(df: pd.DataFrame):
-    """Crée une analyse de risque du portefeuille"""
-    st.subheader("⚠️ Analyse de risque")
+    """
+    Performs a comprehensive risk analysis of the portfolio.
 
-    # Calcul du VaR simplifié (basé sur les performances historiques)
+    Parameters:
+    - df: DataFrame containing portfolio data with columns 'perf' and 'weight'.
+
+    This function calculates various risk metrics including Value at Risk (VaR),
+    Conditional Value at Risk (CVaR), and performs a risk quintile analysis.
+    """
+
+    st.subheader("⚠️ Risk Analysis")
+
     if 'perf' in df.columns and 'weight' in df.columns and len(df) > 0:
         portfolio_weights = df['weight'].values
-        portfolio_returns = df['perf'].values / 100  # Conversion en décimal
+        portfolio_returns = df['perf'].values / 100  # Convert to decimal
 
-        # VaR à 95% (approximation)
-        portfolio_return = np.dot(portfolio_weights, portfolio_returns)
-        portfolio_var = np.dot(portfolio_weights**2, portfolio_returns**2)  # Simplification
-        portfolio_vol = np.sqrt(portfolio_var)
+        # Expected Portfolio Return
+        portfolio_return = np.sum(portfolio_weights * portfolio_returns)
 
-        var_95 = portfolio_return - 1.645 * portfolio_vol  # VaR à 95%
+        # Portfolio Volatility
+        portfolio_vol = np.sqrt(np.sum((portfolio_weights**2) * (portfolio_returns**2)))
 
-        col1, col2, col3 = st.columns(3)
+        # Value at Risk (VaR) at 95%
+        var_95 = portfolio_return - 1.645 * portfolio_vol
+
+        # Conditional Value at Risk (CVaR) at 95%
+        # Sort returns and take the worst 5% to calculate the average
+        sorted_returns = np.sort(portfolio_returns)
+        cvar_95 = np.mean(sorted_returns[:int(len(sorted_returns) * 0.05)])
+
+        # Display metrics
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Rendement attendu", f"{portfolio_return:.2%}")
+            st.metric("Expected Return", f"{portfolio_return:.2%}")
         with col2:
-            st.metric("Volatilité estimée", f"{portfolio_vol:.2%}")
+            st.metric("Estimated Volatility", f"{portfolio_vol:.2%}")
         with col3:
             st.metric("VaR 95% (approx.)", f"{var_95:.2%}")
+        with col4:
+            st.metric("CVaR 95% (approx.)", f"{cvar_95:.2%}")
 
-        # Analyse par quintiles de risque
+        # Risk quintile analysis
         df_risk = df.copy()
-        df_risk['risk_score'] = np.abs(df_risk['perf'])  # Score de risque basique
+        df_risk['risk_score'] = np.abs(df_risk['perf'])
 
         if len(df_risk) >= 3:
-            # Vérification des valeurs uniques
             unique_values = df_risk['risk_score'].nunique()
             if unique_values < 3:
-                st.warning("Nombre insuffisant de valeurs uniques pour créer des bins. Utilisation de valeurs par défaut.")
-                df_risk['risk_quintile'] = 'Moyen'
+                st.warning("Insufficient unique values to create bins. Using default values.")
+                df_risk['risk_quintile'] = 'Medium'
             else:
                 try:
-                    df_risk['risk_quintile'] = pd.qcut(df_risk['risk_score'], 3, labels=['Faible', 'Moyen', 'Élevé'])
+                    df_risk['risk_quintile'] = pd.qcut(df_risk['risk_score'], 3, labels=['Low', 'Medium', 'High'])
                 except ValueError as e:
-                    st.warning(f"Erreur lors de la création des bins : {e}. Utilisation de valeurs par défaut.")
-                    df_risk['risk_quintile'] = 'Moyen'
+                    st.warning(f"Error creating bins: {e}. Using default values.")
+                    df_risk['risk_quintile'] = 'Medium'
         else:
-            df_risk['risk_quintile'] = 'Moyen'  # Valeur par défaut si pas assez de données
+            df_risk['risk_quintile'] = 'Medium'
 
         risk_analysis = df_risk.groupby('risk_quintile').agg({
-            'weight_pct': 'sum',
+            'weight': 'sum',
             'amount': 'sum',
             'name': 'count'
         }).round(2)
 
-        st.subheader("📊 Répartition par niveau de risque")
+        st.subheader("📊 Risk Distribution")
+
         if len(risk_analysis) > 1:
-            fig_risk = px.bar(risk_analysis, x=risk_analysis.index, y='weight_pct',
-                              title="Exposition par niveau de risque (%)")
-            fig_risk.update_layout(height=400, xaxis_title="Niveau de risque", yaxis_title="Poids (%)")
+            fig_risk = px.bar(risk_analysis, x=risk_analysis.index, y='weight',
+                              title="Risk Exposure by Level (%)",
+                              labels={'weight': 'Weight (%)', 'risk_quintile': 'Risk Level'})
+            fig_risk.update_layout(height=400)
             st.plotly_chart(fig_risk, use_container_width=True)
         else:
-            st.info("Pas assez de données pour analyser les niveaux de risque")
+            st.info("Not enough data to analyze risk levels")
+
+        # Additional Visualization: Distribution of Returns
+        st.subheader("📈 Distribution of Returns")
+        fig_hist = px.histogram(df, x='perf', nbins=30, title="Distribution of Portfolio Returns")
+        st.plotly_chart(fig_hist, use_container_width=True)
+
     else:
-        st.info("Données insuffisantes pour l'analyse de risque")
+        st.info("Insufficient data for risk analysis")
 
 
 def export_portfolio_report(df: pd.DataFrame):
