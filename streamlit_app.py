@@ -1314,7 +1314,7 @@ class RiskPerformanceAnalyzer:
 
         # Beta (utilisation de yfinance pour obtenir le bêta)
         if 'symbol' in df.columns:
-            beta = sum([RiskPerformanceAnalyzer.get_beta(ticker) * weight for ticker, weight in zip(df['symbol'], weights)])
+            beta = sum([RiskPerformanceAnalyzer.get_beta(ticker) * weight for ticker, weight in zip(ticker_data['symbol'], weights)])
         else:
             beta = 1.0  # Valeur par défaut si la colonne n'existe pas
 
