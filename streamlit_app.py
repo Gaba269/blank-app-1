@@ -1313,7 +1313,10 @@ class RiskPerformanceAnalyzer:
         cvar_95 = np.mean(returns[returns <= var_95]) if len(returns[returns <= var_95]) > 0 else var_95
 
         # Beta (utilisation de yfinance pour obtenir le bêta)
-        beta = sum([RiskPerformanceAnalyzer.get_beta(ticker) * weight for ticker, weight in zip(df['ticker'], weights)])
+        if 'ticker_data' in df.columns:
+            beta = sum([RiskPerformanceAnalyzer.get_beta(ticker) * weight for ticker, weight in zip(df['ticker_data'], weights)])
+        else:
+            beta = 1.0  # Valeur par défaut si la colonne n'existe pas
 
         # Alpha (Jensen's Alpha)
         market_return = 0.08  # Rendement de marché approximatif
@@ -1433,10 +1436,10 @@ def create_advanced_risk_analysis(df: pd.DataFrame):
 
         with col2:
             # Analyse risque-rendement
-            fig_scatter = px.scatter(df, x='perf', y='weight_pct',
+            fig_scatter = px.scatter(df, x='perf', y='weight',
                                    size='amount', hover_name='name',
                                    title="Risque vs Poids dans le Portfolio",
-                                   labels={'perf': 'Performance (%)', 'weight_pct': 'Poids (%)'})
+                                   labels={'perf': 'Performance (%)', 'weight': 'Poids (%)'})
 
             # Ligne de référence à 0%
             fig_scatter.add_hline(y=0, line_dash="dash", line_color="gray")
@@ -1519,7 +1522,6 @@ def create_advanced_risk_analysis(df: pd.DataFrame):
 
     else:
         st.info("Données insuffisantes pour l'analyse de risque avancée")
-
 # Fonction pour remplacer create_risk_analysis dans le code principal
 def create_risk_analysis(df: pd.DataFrame):
     """Appelle la nouvelle analyse de risque avancée"""
