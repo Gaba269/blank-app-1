@@ -1193,19 +1193,19 @@ def display_portfolio_summary(df: pd.DataFrame):
 def create_risk_analysis(df: pd.DataFrame):
     """Crée une analyse de risque du portefeuille"""
     st.subheader("⚠️ Analyse de risque")
-    
+
     # Calcul du VaR simplifié (basé sur les performances historiques)
     if 'perf' in df.columns and 'weight' in df.columns and len(df) > 0:
         portfolio_weights = df['weight'].values
         portfolio_returns = df['perf'].values / 100  # Conversion en décimal
-        
+
         # VaR à 95% (approximation)
         portfolio_return = np.dot(portfolio_weights, portfolio_returns)
         portfolio_var = np.dot(portfolio_weights**2, portfolio_returns**2)  # Simplification
         portfolio_vol = np.sqrt(portfolio_var)
-        
+
         var_95 = portfolio_return - 1.645 * portfolio_vol  # VaR à 95%
-        
+
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("Rendement attendu", f"{portfolio_return:.2%}")
@@ -1213,26 +1213,32 @@ def create_risk_analysis(df: pd.DataFrame):
             st.metric("Volatilité estimée", f"{portfolio_vol:.2%}")
         with col3:
             st.metric("VaR 95% (approx.)", f"{var_95:.2%}")
-        
+
         # Analyse par quintiles de risque
         df_risk = df.copy()
         df_risk['risk_score'] = np.abs(df_risk['perf'])  # Score de risque basique
-        
+
         if len(df_risk) >= 5:
-            df_risk['risk_quintile'] = pd.qcut(df_risk['risk_score'], 5, labels=['Très Faible', 'Faible', 'Moyen', 'Élevé', 'Très Élevé'])
+            # Vérification des valeurs uniques
+            unique_values = df_risk['risk_score'].nunique()
+            if unique_values < 5:
+                st.warning("Nombre insuffisant de valeurs uniques pour créer 5 quintiles. Utilisation de 3 quintiles à la place.")
+                df_risk['risk_quintile'] = pd.qcut(df_risk['risk_score'], 3, labels=['Faible', 'Moyen', 'Élevé'])
+            else:
+                df_risk['risk_quintile'] = pd.qcut(df_risk['risk_score'], 5, labels=['Très Faible', 'Faible', 'Moyen', 'Élevé', 'Très Élevé'])
         else:
             df_risk['risk_quintile'] = 'Moyen'  # Valeur par défaut si pas assez de données
-        
+
         risk_analysis = df_risk.groupby('risk_quintile').agg({
             'weight_pct': 'sum',
             'amount': 'sum',
             'name': 'count'
         }).round(2)
-        
+
         st.subheader("📊 Répartition par niveau de risque")
         if len(risk_analysis) > 1:
             fig_risk = px.bar(risk_analysis, x=risk_analysis.index, y='weight_pct',
-                             title="Exposition par niveau de risque (%)")
+                              title="Exposition par niveau de risque (%)")
             fig_risk.update_layout(height=400, xaxis_title="Niveau de risque", yaxis_title="Poids (%)")
             st.plotly_chart(fig_risk, use_container_width=True)
         else:
