@@ -1313,8 +1313,8 @@ class RiskPerformanceAnalyzer:
         cvar_95 = np.mean(returns[returns <= var_95]) if len(returns[returns <= var_95]) > 0 else var_95
 
         # Beta (utilisation de yfinance pour obtenir le bêta)
-        if 'ticker_data' in df.columns:
-            beta = sum([RiskPerformanceAnalyzer.get_beta(ticker) * weight for ticker, weight in zip(df['ticker_data'], weights)])
+        if 'symbol' in df.columns:
+            beta = sum([RiskPerformanceAnalyzer.get_beta(ticker) * weight for ticker, weight in zip(df['symbol'], weights)])
         else:
             beta = 1.0  # Valeur par défaut si la colonne n'existe pas
 
@@ -1360,10 +1360,14 @@ class RiskPerformanceAnalyzer:
         else:
             return "D (Insuffisant)"
 
-def create_advanced_risk_analysis(df: pd.DataFrame):
+def create_advanced_risk_analysis(df: pd.DataFrame, ticker_data: Dict):
     """
     Analyse de risque avancée avec nouveaux indicateurs
     """
+    # Ajouter les symboles au DataFrame
+    if 'symbol' not in df.columns and ticker_data:
+        df['symbol'] = [ticker['symbol'] for ticker in ticker_data]
+
     st.subheader("⚠️ Analyse de Risque Avancée")
 
     if 'perf' in df.columns and 'weight' in df.columns and len(df) > 0:
