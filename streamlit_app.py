@@ -1198,8 +1198,7 @@ def create_risk_analysis(df: pd.DataFrame):
     - df: DataFrame containing portfolio data with columns 'perf' and 'weight'.
 
     This function calculates various risk metrics including Value at Risk (VaR),
-    Conditional Value at Risk (CVaR), Sharpe Ratio, Sortino Ratio, Max Drawdown,
-    Skewness, Kurtosis, and performs a risk quintile analysis.
+    Conditional Value at Risk (CVaR), and performs a risk quintile analysis.
     """
 
     st.subheader("⚠️ Risk Analysis")
@@ -1211,58 +1210,29 @@ def create_risk_analysis(df: pd.DataFrame):
         # Expected Portfolio Return
         portfolio_return = np.sum(portfolio_weights * portfolio_returns)
 
-        # Portfolio Volatility (Standard Deviation)
+        # Portfolio Volatility
         portfolio_vol = np.sqrt(np.sum((portfolio_weights**2) * (portfolio_returns**2)))
 
         # Value at Risk (VaR) at 95%
         var_95 = portfolio_return - 1.645 * portfolio_vol
 
         # Conditional Value at Risk (CVaR) at 95%
+        # Sort returns and take the worst 5% to calculate the average
         sorted_returns = np.sort(portfolio_returns)
-        cvar_95 = np.mean(sorted_returns[:max(1, int(len(sorted_returns) * 0.05))])
-
-        # Sharpe Ratio (assume risk-free rate = 0)
-        sharpe_ratio = portfolio_return / portfolio_vol if portfolio_vol != 0 else np.nan
-
-        # Sortino Ratio (use only negative returns volatility)
-        negative_returns = portfolio_returns[portfolio_returns < 0]
-        downside_vol = np.std(negative_returns) if len(negative_returns) > 0 else np.nan
-        sortino_ratio = portfolio_return / downside_vol if downside_vol and downside_vol != 0 else np.nan
-
-        # Max Drawdown
-        cumulative_returns = np.cumprod(1 + portfolio_returns) - 1
-        running_max = np.maximum.accumulate(cumulative_returns)
-        drawdowns = running_max - cumulative_returns
-        max_drawdown = np.max(drawdowns)
-
-        # Skewness and Kurtosis of returns
-        skewness = skew(portfolio_returns)
-        kurt = kurtosis(portfolio_returns)
+        cvar_95 = np.mean(sorted_returns[:int(len(sorted_returns) * 0.05)])
 
         # Display metrics
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("Expected Return", f"{portfolio_return:.2%}")
         with col2:
-            st.metric("Volatility", f"{portfolio_vol:.2%}")
+            st.metric("Estimated Volatility", f"{portfolio_vol:.2%}")
         with col3:
-            st.metric("VaR 95%", f"{var_95:.2%}")
+            st.metric("VaR 95% (approx.)", f"{var_95:.2%}")
         with col4:
-            st.metric("CVaR 95%", f"{cvar_95:.2%}")
+            st.metric("CVaR 95% (approx.)", f"{cvar_95:.2%}")
 
-        col5, col6, col7, col8 = st.columns(4)
-        with col5:
-            st.metric("Sharpe Ratio", f"{sharpe_ratio:.2f}" if not np.isnan(sharpe_ratio) else "N/A")
-        with col6:
-            st.metric("Sortino Ratio", f"{sortino_ratio:.2f}" if not np.isnan(sortino_ratio) else "N/A")
-        with col7:
-            st.metric("Max Drawdown", f"{max_drawdown:.2%}")
-        with col8:
-            st.metric("Skewness", f"{skewness:.2f}")
-
-        st.metric("Kurtosis", f"{kurt:.2f}")
-
-        # Risk quintile analysis (unchanged)
+        # Risk quintile analysis
         df_risk = df.copy()
         df_risk['risk_score'] = np.abs(df_risk['perf'])
 
