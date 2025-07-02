@@ -101,7 +101,7 @@ class TickerService:
     @staticmethod
     def _pattern_search(query: str) -> List[Dict]:
         """Recherche par patterns pour les tickers populaires"""
-          common_tickers={"Microsoft": "MSFT",
+        common_tickers={"Microsoft": "MSFT",
     "Nvidia": "NVDA",
     "Apple Inc.": "AAPL",
     "Amazon": "AMZN",
