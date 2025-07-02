@@ -1218,14 +1218,18 @@ def create_risk_analysis(df: pd.DataFrame):
         df_risk = df.copy()
         df_risk['risk_score'] = np.abs(df_risk['perf'])  # Score de risque basique
 
-        if len(df_risk) >= 5:
+        if len(df_risk) >= 3:
             # Vérification des valeurs uniques
             unique_values = df_risk['risk_score'].nunique()
-            if unique_values < 5:
-                st.warning("Nombre insuffisant de valeurs uniques pour créer 5 quintiles. Utilisation de 3 quintiles à la place.")
-                df_risk['risk_quintile'] = pd.qcut(df_risk['risk_score'], 3, labels=['Faible', 'Moyen', 'Élevé'])
+            if unique_values < 3:
+                st.warning("Nombre insuffisant de valeurs uniques pour créer des bins. Utilisation de valeurs par défaut.")
+                df_risk['risk_quintile'] = 'Moyen'
             else:
-                df_risk['risk_quintile'] = pd.qcut(df_risk['risk_score'], 5, labels=['Très Faible', 'Faible', 'Moyen', 'Élevé', 'Très Élevé'])
+                try:
+                    df_risk['risk_quintile'] = pd.qcut(df_risk['risk_score'], 3, labels=['Faible', 'Moyen', 'Élevé'])
+                except ValueError as e:
+                    st.warning(f"Erreur lors de la création des bins : {e}. Utilisation de valeurs par défaut.")
+                    df_risk['risk_quintile'] = 'Moyen'
         else:
             df_risk['risk_quintile'] = 'Moyen'  # Valeur par défaut si pas assez de données
 
@@ -1245,6 +1249,7 @@ def create_risk_analysis(df: pd.DataFrame):
             st.info("Pas assez de données pour analyser les niveaux de risque")
     else:
         st.info("Données insuffisantes pour l'analyse de risque")
+
 
 def export_portfolio_report(df: pd.DataFrame):
     """Permet d'exporter un rapport du portefeuille"""
