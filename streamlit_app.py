@@ -1829,7 +1829,7 @@ def main():
                     st.info("Données géographiques non disponibles")
         
         with tab3:
-            create_risk_analysis(df)
+            create_advanced_risk_analysis(df)
         
         with tab4:
             st.subheader("🎯 Recommandations personnalisées")
