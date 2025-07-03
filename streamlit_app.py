@@ -1006,77 +1006,77 @@ class PortfolioManager:
     
         return True
     
-def update_portfolio_metrics(self):
-    """Met à jour toutes les métriques du portefeuille avec rendements annualisés"""
-    if st.session_state.portfolio_df.empty:
-        return {
-            'total_value': 0, 
-            'portfolio_performance': 0,
-            'annualized_return': 0,
-            'weighted_annualized_return': 0
-        }
-    
-    df = st.session_state.portfolio_df.copy()
-    current_date = datetime.now().date()
+    def update_portfolio_metrics(self):
+        """Met à jour toutes les métriques du portefeuille avec rendements annualisés"""
+        if st.session_state.portfolio_df.empty:
+            return {
+                'total_value': 0, 
+                'portfolio_performance': 0,
+                'annualized_return': 0,
+                'weighted_annualized_return': 0
+            }
+        
+        df = st.session_state.portfolio_df.copy()
+        current_date = datetime.now().date()
     
     # Calculs de base
-    total_value = df['amount'].sum()
+        total_value = df['amount'].sum()
     
     # Éviter la division par zéro
-    if total_value > 0:
-        df['weight'] = df['amount'] / total_value
-        df['weight_pct'] = df['weight'] * 100
-    else:
-        df['weight'] = 0
-        df['weight_pct'] = 0
-    
+        if total_value > 0:
+            df['weight'] = df['amount'] / total_value
+            df['weight_pct'] = df['weight'] * 100
+        else:
+            df['weight'] = 0
+            df['weight_pct'] = 0
+        
     # Calcul des performances simples
-    df['perf'] = ((df['lastPrice'] - df['buyingPrice']) / df['buyingPrice'] * 100).fillna(0)
+        df['perf'] = ((df['lastPrice'] - df['buyingPrice']) / df['buyingPrice'] * 100).fillna(0)
     
     # Calcul des jours de détention pour chaque position
-    df['days_held'] = df['purchase_date'].apply(
-        lambda x: (current_date - x).days if pd.notna(x) else 1
-    )
+        df['days_held'] = df['purchase_date'].apply(
+            lambda x: (current_date - x).days if pd.notna(x) else 1
+        )
     
     # Calcul des rendements annualisés pour chaque position
-    df['annualized_return'] = df.apply(
-        lambda row: calculate_annualized_return(
-            row['buyingPrice'] * row['quantity'],  # Valeur initiale
-            row['lastPrice'] * row['quantity'],    # Valeur actuelle
-            row['days_held']
-        ), axis=1
-    )
+        df['annualized_return'] = df.apply(
+            lambda row: calculate_annualized_return(
+                row['buyingPrice'] * row['quantity'],  # Valeur initiale
+                row['lastPrice'] * row['quantity'],    # Valeur actuelle
+                row['days_held']
+            ), axis=1
+        )
     
     # Performance pondérée simple
-    portfolio_perf = (df['weight'] * df['perf']).sum()
+        portfolio_perf = (df['weight'] * df['perf']).sum()
     
     # Rendement annualisé pondéré du portefeuille
-    weighted_annualized_return = (df['weight'] * df['annualized_return']).sum()
+        weighted_annualized_return = (df['weight'] * df['annualized_return']).sum()
     
     # Calcul alternatif : rendement annualisé du portefeuille total
-    total_initial_value = (df['buyingPrice'] * df['quantity']).sum()
-    total_current_value = (df['lastPrice'] * df['quantity']).sum()
+        total_initial_value = (df['buyingPrice'] * df['quantity']).sum()
+        total_current_value = (df['lastPrice'] * df['quantity']).sum()
     
     # Moyenne pondérée des jours de détention
-    weighted_days_held = (df['weight'] * df['days_held']).sum()
+        weighted_days_held = (df['weight'] * df['days_held']).sum()
     
-    portfolio_annualized_return = calculate_annualized_return(
-        total_initial_value,
-        total_current_value,
-        max(1, int(weighted_days_held))  # Éviter les valeurs nulles
-    )
+        portfolio_annualized_return = calculate_annualized_return(
+            total_initial_value,
+            total_current_value,
+            max(1, int(weighted_days_held))  # Éviter les valeurs nulles
+        )
     
-    st.session_state.portfolio_df = df
+        st.session_state.portfolio_df = df
     
-    return {
-        'total_value': total_value,
-        'portfolio_performance': portfolio_perf,
-        'annualized_return': portfolio_annualized_return,
-        'weighted_annualized_return': weighted_annualized_return,
-        'total_initial_value': total_initial_value,
-        'total_current_value': total_current_value,
-        'weighted_days_held': weighted_days_held
-    }
+        return {
+            'total_value': total_value,
+            'portfolio_performance': portfolio_perf,
+            'annualized_return': portfolio_annualized_return,
+            'weighted_annualized_return': weighted_annualized_return,
+            'total_initial_value': total_initial_value,
+            'total_current_value': total_current_value,
+            'weighted_days_held': weighted_days_held
+        }
 
 def get_portfolio_annualized_metrics(self) -> Dict:
     """Retourne les métriques annualisées détaillées du portefeuille"""
