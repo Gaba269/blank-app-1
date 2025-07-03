@@ -1535,7 +1535,7 @@ class RiskPerformanceAnalyzer:
             return 1.0
 
     @staticmethod
-def calculate_advanced_metrics(df: pd.DataFrame, period_days: int = 252) -> Dict:
+    def calculate_advanced_metrics(df: pd.DataFrame, period_days: int = 252) -> Dict:
     """
     Calcule les métriques avancées de risque et performance
     """
@@ -1667,20 +1667,7 @@ def calculate_advanced_metrics(df: pd.DataFrame, period_days: int = 252) -> Dict
         'portfolio_return': annualized_return,
         'portfolio_volatility': annualized_volatility
     }
-        return {
-            'sharpe_ratio': sharpe_ratio,
-            'sortino_ratio': sortino_ratio,
-            'calmar_ratio': calmar_ratio,
-            'max_drawdown': max_drawdown,
-            'var_95': var_95,
-            'cvar_95': cvar_95,
-            'beta': portfolio_beta,
-            'alpha': alpha,
-            'information_ratio': information_ratio,
-            'treynor_ratio': treynor_ratio,
-            'portfolio_return': annualized_return,
-            'portfolio_volatility': annualized_volatility
-        }
+        
 
     @staticmethod
     def get_performance_grade(sharpe_ratio: float, sortino_ratio: float) -> str:
