@@ -2302,6 +2302,9 @@ def main():
                     
                     # Saisie de la quantité
                     quantity = st.number_input("Quantité", min_value=1, value=1)
+
+                    #Saisie de la date
+                    date=st.date_input(f"Purchase Date for {row['symbol']}",value=datetime.now() )
                     
                     # NOUVELLE SECTION : Choix du prix d'achat
                     st.markdown("**Prix d'achat:**")
