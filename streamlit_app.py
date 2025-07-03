@@ -1246,7 +1246,51 @@ def display_portfolio_summary(df: pd.DataFrame):
             'Poids (%)': '{:.1f}',
             'Performance (%)': '{:.2f}'
         }), use_container_width=True)
+rom scipy.optimize import minimize
 
+class EfficientFrontier:
+    @staticmethod
+    def calculate_portfolio_performance(weights, mean_returns, cov_matrix):
+        """Calcule la performance du portefeuille."""
+        returns = np.sum(mean_returns * weights) * 252
+        std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights))) * np.sqrt(252)
+        return std, returns
+
+    @staticmethod
+    def negative_sharpe_ratio(weights, mean_returns, cov_matrix, risk_free_rate=0.02):
+        """Calcule le ratio de Sharpe négatif pour l'optimisation."""
+        p_var, p_ret = EfficientFrontier.calculate_portfolio_performance(weights, mean_returns, cov_matrix)
+        return -(p_ret - risk_free_rate) / p_var
+
+    @staticmethod
+    def get_efficient_frontier(tickers, start_date, end_date):
+        """Calcule la frontière efficiente."""
+        data = yf.download(tickers, start=start_date, end=end_date)['Adj Close']
+        returns = data.pct_change().dropna()
+        mean_returns = returns.mean()
+        cov_matrix = returns.cov()
+
+        num_assets = len(mean_returns)
+        args = (mean_returns, cov_matrix)
+        constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+        bound = (0.0, 1.0)
+        bounds = tuple(bound for asset in range(num_assets))
+
+        # Optimisation pour maximiser le ratio de Sharpe
+        result = minimize(EfficientFrontier.negative_sharpe_ratio,
+                          num_assets * [1. / num_assets, ],
+                          args=args,
+                          method='SLSQP',
+                          bounds=bounds,
+                          constraints=constraints)
+
+        if result.success:
+            optimal_weights = result.x
+            optimal_weights_df = pd.DataFrame(optimal_weights, index=tickers, columns=['weight'])
+            return optimal_weights_df
+        else:
+            return pd.DataFrame()
+            
 class RiskPerformanceAnalyzer:
     """Analyseur avancé de risque et performance"""
 
@@ -1524,7 +1568,22 @@ def create_advanced_risk_analysis(df: pd.DataFrame, ticker_data: Optional[List[D
             st.error(f"Une erreur est survenue lors de l'analyse de risque avancée : {str(e)}")
     else:
         st.info("Données insuffisantes pour l'analyse de risque avancée")
+    st.subheader("📈 Frontière Efficiente")
 
+    if 'symbol' in df.columns:
+        tickers = df['symbol'].tolist()
+        start_date = '2020-01-01'
+        end_date = '2023-01-01'
+
+        efficient_frontier_weights = EfficientFrontier.get_efficient_frontier(tickers, start_date, end_date)
+
+        if not efficient_frontier_weights.empty:
+            st.write("Poids optimaux pour maximiser le ratio de Sharpe:")
+            st.dataframe(efficient_frontier_weights.style.format({'weight': '{:.2%}'}))
+        else:
+            st.warning("Impossible de calculer la frontière efficiente avec les données fournies.")
+    else:
+        st.error("La colonne 'symbol' est manquante dans le DataFrame.")
 # Fonction pour remplacer create_risk_analysis dans le code principal
 def create_risk_analysis(df: pd.DataFrame):
     """Appelle la nouvelle analyse de risque avancée"""
