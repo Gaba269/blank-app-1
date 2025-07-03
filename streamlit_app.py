@@ -2273,7 +2273,7 @@ def main():
                     # Saisie de la quantité
                     quantity = st.number_input("Quantité", min_value=1, value=1)
 
-                    date_purchase=st.datetime.now().strftime("%Y-%m-%d")
+                    date_purchase=datetime.now().strftime("%Y-%m-%d")
                     st.write(f"**Date d'achat:** {purchase_date}")
 
                     # NOUVELLE SECTION : Choix du prix d'achat
