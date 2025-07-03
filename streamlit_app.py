@@ -1835,7 +1835,7 @@ def main():
         
         with tab3:
             create_advanced_risk_analysis(df)
-        
+            st.rerun()
         with tab4:
             st.subheader("🎯 Recommandations personnalisées")
             
