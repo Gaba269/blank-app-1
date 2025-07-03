@@ -1266,7 +1266,7 @@ class EfficientFrontier:
     @staticmethod
     def get_efficient_frontier(tickers, start_date, end_date):
         """Calcule la frontière efficiente."""
-        data = yf.download(tickers, start=start_date, end=end_date)['Adj Close']
+        data = yf.download(tickers, start=start_date, end=end_date)['Close']
         returns = data.pct_change().dropna()
         mean_returns = returns.mean()
         cov_matrix = returns.cov()
