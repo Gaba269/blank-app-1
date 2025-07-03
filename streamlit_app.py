@@ -1535,108 +1535,138 @@ class RiskPerformanceAnalyzer:
             return 1.0
 
     @staticmethod
-    def calculate_advanced_metrics(df: pd.DataFrame, period_days: int = 252) -> Dict:
-        """
-        Calcule les métriques avancées de risque et performance
-        
-        Args:
-            df: DataFrame avec colonnes 'perf' (performances en %) et 'weight' (poids)
-            period_days: Nombre de jours pour l'annualisation (252 par défaut)
-        """
-        if 'perf' not in df.columns or 'weight' not in df.columns or len(df) == 0:
-            return {
-                'sharpe_ratio': 0,
-                'sortino_ratio': 0,
-                'calmar_ratio': 0,
-                'max_drawdown': 0,
-                'var_95': 0,
-                'cvar_95': 0,
-                'beta': 1.0,
-                'alpha': 0,
-                'information_ratio': 0,
-                'treynor_ratio': 0,
-                'portfolio_return': 0,
-                'portfolio_volatility': 0
-            }
+def calculate_advanced_metrics(df: pd.DataFrame, period_days: int = 252) -> Dict:
+    """
+    Calcule les métriques avancées de risque et performance
+    """
+    if 'perf' not in df.columns or 'weight' not in df.columns or len(df) == 0:
+        return {
+            'sharpe_ratio': 0,
+            'sortino_ratio': 0,
+            'calmar_ratio': 0,
+            'max_drawdown': 0,
+            'var_95': 0,
+            'cvar_95': 0,
+            'beta': 1.0,
+            'alpha': 0,
+            'information_ratio': 0,
+            'treynor_ratio': 0,
+            'portfolio_return': 0,
+            'portfolio_volatility': 0
+        }
 
-        # Conversion des performances en rendements décimaux
-        returns = df['perf'].values / 100
-        weights = df['weight'].values / 100  # Normaliser les poids
-        
-        # Normaliser les poids pour qu'ils somment à 1
-        if np.sum(weights) > 0:
-            weights = weights / np.sum(weights)
-        else:
-            weights = np.ones(len(weights)) / len(weights)
+    # Conversion des performances en rendements décimaux
+    returns = df['perf'].values / 100
+    weights = df['weight'].values / 100  # Normaliser les poids
 
-        # Rendement du portefeuille (moyenne pondérée)
-        portfolio_return = np.sum(weights * returns)
-        
-        # Volatilité du portefeuille (formule correcte avec matrice de covariance)
-        # Approximation: volatilité = sqrt(somme des variances pondérées)
-        individual_volatilities = np.abs(returns - np.mean(returns))
-        portfolio_volatility = np.sqrt(np.sum((weights**2) * (individual_volatilities**2)))
-        
-        # Annualisation des métriques
-        annualized_return = portfolio_return * period_days
-        annualized_volatility = portfolio_volatility * np.sqrt(period_days)
-        
-        # Taux sans risque (2% annuel)
-        risk_free_rate = 0.02
-        
-        # Sharpe Ratio (annualisé)
-        sharpe_ratio = (annualized_return - risk_free_rate) / annualized_volatility if annualized_volatility > 0 else 0
-        
-        # Sortino Ratio (utilise seulement la volatilité des rendements négatifs)
-        negative_returns = returns[returns < 0]
-        if len(negative_returns) > 0:
-            downside_deviation = np.std(negative_returns) * np.sqrt(period_days)
-        else:
-            downside_deviation = annualized_volatility
-        
-        sortino_ratio = (annualized_return - risk_free_rate) / downside_deviation if downside_deviation > 0 else 0
-        
-        # Maximum Drawdown (estimation basée sur la distribution)
-        # Approche simplifiée: maximum des pertes potentielles
-        sorted_returns = np.sort(returns)
-        max_drawdown = abs(sorted_returns[0]) if len(sorted_returns) > 0 else 0
-        
-        # Calmar Ratio
-        calmar_ratio = annualized_return / max_drawdown if max_drawdown > 0 else 0
-        
-        # Value at Risk (VaR) 95% (perte maximale avec 95% de confiance)
-        var_95 = np.percentile(returns, 5)
-        
-        # Conditional VaR (CVaR) 95% (perte moyenne au-delà du VaR)
-        returns_below_var = returns[returns <= var_95]
-        cvar_95 = np.mean(returns_below_var) if len(returns_below_var) > 0 else var_95
-        
-        # Beta du portefeuille
-        portfolio_beta = 1.0
-        if 'symbol' in df.columns:
-            try:
-                betas = []
-                for idx, row in df.iterrows():
-                    if pd.notna(row['symbol']) and row['symbol'].strip():
-                        beta = RiskPerformanceAnalyzer.get_beta(row['symbol'])
-                        betas.append(beta * weights[idx])
-                
-                if betas:
-                    portfolio_beta = np.sum(betas)
-            except:
-                portfolio_beta = 1.0
-        
-        # Alpha (rendement excédentaire ajusté du risque)
-        market_return = 0.08  # Rendement de marché approximatif (8% annuel)
-        alpha = annualized_return - (risk_free_rate + portfolio_beta * (market_return - risk_free_rate))
-        
-        # Information Ratio (alpha / tracking error)
-        tracking_error = annualized_volatility * 0.8  # Approximation du tracking error
-        information_ratio = alpha / tracking_error if tracking_error > 0 else 0
-        
-        # Treynor Ratio (rendement excédentaire par unité de risque systématique)
-        treynor_ratio = (annualized_return - risk_free_rate) / portfolio_beta if portfolio_beta > 0 else 0
-        
+    # Debugging: Print intermediate values
+    print("Returns:", returns)
+    print("Weights before normalization:", weights)
+
+    # Normaliser les poids pour qu'ils somment à 1
+    if np.sum(weights) > 0:
+        weights = weights / np.sum(weights)
+    else:
+        weights = np.ones(len(weights)) / len(weights)
+
+    print("Weights after normalization:", weights)
+
+    # Rendement du portefeuille (moyenne pondérée)
+    portfolio_return = np.sum(weights * returns)
+    print("Portfolio Return (daily):", portfolio_return)
+
+    # Volatilité du portefeuille
+    individual_volatilities = np.abs(returns - np.mean(returns))
+    portfolio_volatility = np.sqrt(np.sum((weights**2) * (individual_volatilities**2)))
+    print("Portfolio Volatility (daily):", portfolio_volatility)
+
+    # Annualisation des métriques
+    annualized_return = portfolio_return * period_days
+    annualized_volatility = portfolio_volatility * np.sqrt(period_days)
+    print("Annualized Return:", annualized_return)
+    print("Annualized Volatility:", annualized_volatility)
+
+    # Taux sans risque (2% annuel)
+    risk_free_rate = 0.02
+
+    # Sharpe Ratio (annualisé)
+    sharpe_ratio = (annualized_return - risk_free_rate) / annualized_volatility if annualized_volatility > 0 else 0
+    print("Sharpe Ratio:", sharpe_ratio)
+
+    # Sortino Ratio (utilise seulement la volatilité des rendements négatifs)
+    negative_returns = returns[returns < 0]
+    if len(negative_returns) > 0:
+        downside_deviation = np.std(negative_returns) * np.sqrt(period_days)
+    else:
+        downside_deviation = annualized_volatility
+
+    sortino_ratio = (annualized_return - risk_free_rate) / downside_deviation if downside_deviation > 0 else 0
+    print("Sortino Ratio:", sortino_ratio)
+
+    # Maximum Drawdown (estimation basée sur la distribution)
+    sorted_returns = np.sort(returns)
+    max_drawdown = abs(sorted_returns[0]) if len(sorted_returns) > 0 else 0
+    print("Max Drawdown:", max_drawdown)
+
+    # Calmar Ratio
+    calmar_ratio = annualized_return / max_drawdown if max_drawdown > 0 else 0
+    print("Calmar Ratio:", calmar_ratio)
+
+    # Value at Risk (VaR) 95% (perte maximale avec 95% de confiance)
+    var_95 = np.percentile(returns, 5)
+    print("VaR 95%:", var_95)
+
+    # Conditional VaR (CVaR) 95% (perte moyenne au-delà du VaR)
+    returns_below_var = returns[returns <= var_95]
+    cvar_95 = np.mean(returns_below_var) if len(returns_below_var) > 0 else var_95
+    print("CVaR 95%:", cvar_95)
+
+    # Beta du portefeuille
+    portfolio_beta = 1.0
+    if 'symbol' in df.columns:
+        try:
+            betas = []
+            for idx, row in df.iterrows():
+                if pd.notna(row['symbol']) and row['symbol'].strip():
+                    beta = RiskPerformanceAnalyzer.get_beta(row['symbol'])
+                    betas.append(beta * weights[idx])
+
+            if betas:
+                portfolio_beta = np.sum(betas)
+        except Exception as e:
+            print(f"Error calculating beta: {e}")
+            portfolio_beta = 1.0
+
+    print("Portfolio Beta:", portfolio_beta)
+
+    # Alpha (rendement excédentaire ajusté du risque)
+    market_return = 0.08  # Rendement de marché approximatif (8% annuel)
+    alpha = annualized_return - (risk_free_rate + portfolio_beta * (market_return - risk_free_rate))
+    print("Alpha:", alpha)
+
+    # Information Ratio (alpha / tracking error)
+    tracking_error = annualized_volatility * 0.8  # Approximation du tracking error
+    information_ratio = alpha / tracking_error if tracking_error > 0 else 0
+    print("Information Ratio:", information_ratio)
+
+    # Treynor Ratio (rendement excédentaire par unité de risque systématique)
+    treynor_ratio = (annualized_return - risk_free_rate) / portfolio_beta if portfolio_beta > 0 else 0
+    print("Treynor Ratio:", treynor_ratio)
+
+    return {
+        'sharpe_ratio': sharpe_ratio,
+        'sortino_ratio': sortino_ratio,
+        'calmar_ratio': calmar_ratio,
+        'max_drawdown': max_drawdown,
+        'var_95': var_95,
+        'cvar_95': cvar_95,
+        'beta': portfolio_beta,
+        'alpha': alpha,
+        'information_ratio': information_ratio,
+        'treynor_ratio': treynor_ratio,
+        'portfolio_return': annualized_return,
+        'portfolio_volatility': annualized_volatility
+    }
         return {
             'sharpe_ratio': sharpe_ratio,
             'sortino_ratio': sortino_ratio,
