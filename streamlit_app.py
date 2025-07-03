@@ -1723,7 +1723,7 @@ def create_advanced_risk_analysis(df: pd.DataFrame, ticker_data: Optional[List[D
                                                 'weight_pct': '{:.2f}%',
                                                 'current_weight_pct': '{:.2f}%',
                                                 'difference': '{:+.2f}%'
-                                            })..background_gradient(subset=['difference'], cmap='RdYlGn'),
+                                            }).background_gradient(subset=['difference'], cmap='RdYlGn'),
                                             column_config={
                                                 'weight_pct': 'Poids optimal (%)',
                                                 'current_weight_pct': 'Poids actuel (%)',
