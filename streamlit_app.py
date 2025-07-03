@@ -1261,10 +1261,11 @@ class EfficientFrontier:
     def negative_sharpe_ratio(weights, mean_returns, cov_matrix, risk_free_rate=0.02):
         """Calcule le ratio de Sharpe négatif pour l'optimisation."""
         try:
-            p_var, p_ret = EfficientFrontier.calculate_portfolio_performance(weights, mean_returns, cov_matrix)
-            if p_var == 0:
+            p_std, p_ret = EfficientFrontier.calculate_portfolio_performance(weights, mean_returns, cov_matrix)
+            if p_std == 0:
                 return float('inf')
-            return -(p_ret - risk_free_rate) / p_var
+            return -(p_ret - risk_free_rate) / p_std
+
         except Exception as e:
             print(f"Erreur dans negative_sharpe_ratio: {e}")
             return float('inf')
