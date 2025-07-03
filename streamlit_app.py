@@ -1394,8 +1394,8 @@ class EfficientFrontier:
                 )
                 
                 # Calculer les métriques du portefeuille optimal
-                opt_return, opt_vol = EfficientFrontier.calculate_portfolio_performance(
-                    optimal_weights, mean_returns, cov_matrix
+                opt_vol, opt_return = EfficientFrontier.calculate_portfolio_performance(
+                        optimal_weights, mean_returns, cov_matrix
                 )
                 
                 sharpe_ratio = (opt_return - 0.02) / opt_vol if opt_vol > 0 else 0
