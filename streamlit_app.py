@@ -1260,37 +1260,222 @@ class EfficientFrontier:
     @staticmethod
     def negative_sharpe_ratio(weights, mean_returns, cov_matrix, risk_free_rate=0.02):
         """Calcule le ratio de Sharpe négatif pour l'optimisation."""
-        p_var, p_ret = EfficientFrontier.calculate_portfolio_performance(weights, mean_returns, cov_matrix)
-        return -(p_ret - risk_free_rate) / p_var
+        try:
+            p_var, p_ret = EfficientFrontier.calculate_portfolio_performance(weights, mean_returns, cov_matrix)
+            if p_var == 0:
+                return float('inf')
+            return -(p_ret - risk_free_rate) / p_var
+        except Exception as e:
+            print(f"Erreur dans negative_sharpe_ratio: {e}")
+            return float('inf')
 
     @staticmethod
-    def get_efficient_frontier(tickers, start_date, end_date):
-        """Calcule la frontière efficiente."""
-        data = yf.download(tickers, start=start_date, end=end_date)['Close']
-        returns = data.pct_change().dropna()
-        mean_returns = returns.mean()
-        cov_matrix = returns.cov()
+    def portfolio_volatility(weights, mean_returns, cov_matrix):
+        """Calcule la volatilité du portefeuille."""
+        return np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights))) * np.sqrt(252)
 
-        num_assets = len(mean_returns)
-        args = (mean_returns, cov_matrix)
-        constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-        bound = (0.0, 1.0)
-        bounds = tuple(bound for asset in range(num_assets))
+    @staticmethod
+    def minimize_volatility(weights, mean_returns, cov_matrix):
+        """Fonction objectif pour minimiser la volatilité."""
+        return EfficientFrontier.portfolio_volatility(weights, mean_returns, cov_matrix)
 
-        # Optimisation pour maximiser le ratio de Sharpe
-        result = minimize(EfficientFrontier.negative_sharpe_ratio,
-                          num_assets * [1. / num_assets, ],
-                          args=args,
-                          method='SLSQP',
-                          bounds=bounds,
-                          constraints=constraints)
+    @staticmethod
+    def portfolio_return(weights, mean_returns):
+        """Calcule le rendement du portefeuille."""
+        return np.sum(mean_returns * weights) * 252
 
-        if result.success:
-            optimal_weights = result.x
-            optimal_weights_df = pd.DataFrame(optimal_weights, index=tickers, columns=['weight'])
-            return optimal_weights_df
-        else:
-            return pd.DataFrame()
+    @staticmethod
+    def download_data_with_retry(tickers: List[str], start_date: str, end_date: str, max_retries: int = 3) -> pd.DataFrame:
+        """Télécharge les données avec gestion des erreurs et retry."""
+        for attempt in range(max_retries):
+            try:
+                # Nettoyer les tickers
+                clean_tickers = [ticker.strip().upper() for ticker in tickers if ticker and ticker.strip()]
+                
+                if not clean_tickers:
+                    raise ValueError("Aucun ticker valide fourni")
+                
+                # Télécharger les données
+                data = yf.download(clean_tickers, start=start_date, end=end_date, progress=False)
+                
+                if data.empty:
+                    raise ValueError("Aucune donnée téléchargée")
+                
+                # Gérer le cas d'un seul ticker
+                if len(clean_tickers) == 1:
+                    if isinstance(data.columns, pd.MultiIndex):
+                        data = data.droplevel(1, axis=1)
+                    close_data = data['Close'].to_frame()
+                    close_data.columns = clean_tickers
+                else:
+                    close_data = data['Close']
+                
+                # Vérifier qu'on a des données valides
+                if close_data.empty or close_data.dropna().empty:
+                    raise ValueError("Données vides après nettoyage")
+                
+                return close_data
+                
+            except Exception as e:
+                print(f"Tentative {attempt + 1} échouée: {e}")
+                if attempt == max_retries - 1:
+                    raise e
+                
+        return pd.DataFrame()
+
+    @staticmethod
+    def get_efficient_frontier(tickers: List[str], start_date: str, end_date: str) -> Tuple[pd.DataFrame, Dict]:
+        """Calcule la frontière efficiente avec gestion d'erreurs améliorée."""
+        try:
+            # Validation des paramètres
+            if not tickers or len(tickers) < 2:
+                return pd.DataFrame(), {"error": "Au moins 2 tickers sont nécessaires"}
+            
+            # Téléchargement des données
+            data = EfficientFrontier.download_data_with_retry(tickers, start_date, end_date)
+            
+            if data.empty:
+                return pd.DataFrame(), {"error": "Impossible de télécharger les données"}
+            
+            # Calcul des rendements
+            returns = data.pct_change().dropna()
+            
+            if returns.empty or len(returns) < 30:  # Au moins 30 jours de données
+                return pd.DataFrame(), {"error": "Données insuffisantes (moins de 30 jours)"}
+            
+            # Vérifier les colonnes disponibles
+            available_tickers = [col for col in returns.columns if col in tickers]
+            if len(available_tickers) < 2:
+                return pd.DataFrame(), {"error": "Moins de 2 tickers avec des données valides"}
+            
+            # Filtrer les données aux tickers disponibles
+            returns = returns[available_tickers]
+            
+            # Supprimer les colonnes avec trop de NaN
+            returns = returns.dropna(axis=1, thresh=len(returns) * 0.5)
+            
+            if returns.empty or len(returns.columns) < 2:
+                return pd.DataFrame(), {"error": "Trop de données manquantes"}
+            
+            # Calculer les statistiques
+            mean_returns = returns.mean()
+            cov_matrix = returns.cov()
+            
+            # Vérifier la matrice de covariance
+            if np.any(np.isnan(cov_matrix.values)) or np.any(np.isinf(cov_matrix.values)):
+                return pd.DataFrame(), {"error": "Matrice de covariance invalide"}
+            
+            num_assets = len(mean_returns)
+            
+            # Contraintes et bornes
+            constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+            bounds = tuple((0.0, 1.0) for _ in range(num_assets))
+            
+            # Optimisation pour maximiser le ratio de Sharpe
+            initial_guess = np.array([1.0 / num_assets] * num_assets)
+            
+            result = minimize(
+                EfficientFrontier.negative_sharpe_ratio,
+                initial_guess,
+                args=(mean_returns, cov_matrix),
+                method='SLSQP',
+                bounds=bounds,
+                constraints=constraints,
+                options={'maxiter': 1000, 'ftol': 1e-9}
+            )
+            
+            if result.success:
+                optimal_weights = result.x
+                optimal_weights_df = pd.DataFrame(
+                    optimal_weights, 
+                    index=returns.columns, 
+                    columns=['weight']
+                )
+                
+                # Calculer les métriques du portefeuille optimal
+                opt_return, opt_vol = EfficientFrontier.calculate_portfolio_performance(
+                    optimal_weights, mean_returns, cov_matrix
+                )
+                
+                sharpe_ratio = (opt_return - 0.02) / opt_vol if opt_vol > 0 else 0
+                
+                metrics = {
+                    'expected_return': opt_return,
+                    'volatility': opt_vol,
+                    'sharpe_ratio': sharpe_ratio,
+                    'num_assets': num_assets,
+                    'data_points': len(returns)
+                }
+                
+                return optimal_weights_df, metrics
+            else:
+                return pd.DataFrame(), {"error": f"Optimisation échouée: {result.message}"}
+                
+        except Exception as e:
+            return pd.DataFrame(), {"error": f"Erreur lors du calcul: {str(e)}"}
+
+    @staticmethod
+    def generate_efficient_frontier_curve(tickers: List[str], start_date: str, end_date: str, num_portfolios: int = 100) -> Tuple[List[float], List[float]]:
+        """Génère la courbe complète de la frontière efficiente."""
+        try:
+            # Téléchargement des données
+            data = EfficientFrontier.download_data_with_retry(tickers, start_date, end_date)
+            
+            if data.empty:
+                return [], []
+            
+            returns = data.pct_change().dropna()
+            
+            if returns.empty or len(returns.columns) < 2:
+                return [], []
+            
+            mean_returns = returns.mean()
+            cov_matrix = returns.cov()
+            
+            num_assets = len(mean_returns)
+            
+            # Générer une gamme de rendements cibles
+            min_ret = mean_returns.min() * 252
+            max_ret = mean_returns.max() * 252
+            target_returns = np.linspace(min_ret, max_ret, num_portfolios)
+            
+            efficient_portfolios = []
+            
+            for target_return in target_returns:
+                # Contraintes pour un rendement cible
+                constraints = [
+                    {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                    {'type': 'eq', 'fun': lambda x, target=target_return: 
+                     EfficientFrontier.portfolio_return(x, mean_returns) - target}
+                ]
+                
+                bounds = tuple((0.0, 1.0) for _ in range(num_assets))
+                initial_guess = np.array([1.0 / num_assets] * num_assets)
+                
+                result = minimize(
+                    EfficientFrontier.minimize_volatility,
+                    initial_guess,
+                    args=(mean_returns, cov_matrix),
+                    method='SLSQP',
+                    bounds=bounds,
+                    constraints=constraints,
+                    options={'maxiter': 1000}
+                )
+                
+                if result.success:
+                    vol = EfficientFrontier.portfolio_volatility(result.x, mean_returns, cov_matrix)
+                    efficient_portfolios.append((target_return, vol))
+            
+            if efficient_portfolios:
+                returns_list, volatility_list = zip(*efficient_portfolios)
+                return list(returns_list), list(volatility_list)
+            else:
+                return [], []
+                
+        except Exception as e:
+            print(f"Erreur génération courbe: {e}")
+            return [], []
+
             
 class RiskPerformanceAnalyzer:
     """Analyseur avancé de risque et performance"""
@@ -1406,10 +1591,10 @@ class RiskPerformanceAnalyzer:
             return "D (Insuffisant)"
 
 def create_advanced_risk_analysis(df: pd.DataFrame, ticker_data: Optional[List[Dict]] = None):
+
     """
-    Analyse de risque avancée avec nouveaux indicateurs
+    Analyse de risque avancée avec frontière efficiente corrigée
     """
-    # Vérification que df est un DataFrame valide
     if not isinstance(df, pd.DataFrame):
         st.error("L'argument df doit être un DataFrame pandas.")
         return
@@ -1430,10 +1615,11 @@ def create_advanced_risk_analysis(df: pd.DataFrame, ticker_data: Optional[List[D
 
     if len(df) > 0:
         try:
-            # Calcul des métriques avancées
+            # Calcul des métriques avancées (votre code existant)
+            from your_existing_module import RiskPerformanceAnalyzer  # Remplacez par votre import
             metrics = RiskPerformanceAnalyzer.calculate_advanced_metrics(df)
 
-            # Affichage des métriques principales
+            # Affichage des métriques principales (votre code existant)
             st.markdown("#### 📊 Métriques de Performance")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -1449,67 +1635,206 @@ def create_advanced_risk_analysis(df: pd.DataFrame, ticker_data: Optional[List[D
                 st.metric("Max Drawdown", f"{metrics['max_drawdown']:.2%}")
                 st.metric("Calmar Ratio", f"{metrics['calmar_ratio']:.3f}")
 
-            # Métriques supplémentaires
-            st.markdown("#### 📈 Métriques Avancées")
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Beta", f"{metrics['beta']:.3f}")
-            with col2:
-                st.metric("Alpha", f"{metrics['alpha']:.3f}")
-            with col3:
-                st.metric("Information Ratio", f"{metrics['information_ratio']:.3f}")
-            with col4:
-                st.metric("Treynor Ratio", f"{metrics['treynor_ratio']:.3f}")
-
-            # Note de performance
-            performance_grade = RiskPerformanceAnalyzer.get_performance_grade(
-                metrics['sharpe_ratio'], metrics['sortino_ratio']
-            )
-            st.markdown(f"""
-            <div class="metric-card">
-                <h4>🎯 Note de Performance</h4>
-                <h2 style="color: {'green' if 'A' in performance_grade else 'orange' if 'B' in performance_grade else 'red'}">
-                    {performance_grade}
-                </h2>
-            </div>
-            """, unsafe_allow_html=True)
-
-            # Graphiques de risque
-            col1, col2 = st.columns(2)
-            with col1:
-                fig_hist = px.histogram(df, x='perf', nbins=20,
-                                      title="Distribution des Rendements",
-                                      labels={'perf': 'Performance (%)', 'count': 'Nombre d\'actifs'})
-                fig_hist.add_vline(x=metrics['var_95']*100, line_dash="dash",
-                                  line_color="red", annotation_text="VaR 95%")
-                fig_hist.add_vline(x=metrics['cvar_95']*100, line_dash="dash",
-                                  line_color="darkred", annotation_text="CVaR 95%")
-                st.plotly_chart(fig_hist, use_container_width=True)
-            with col2:
-                fig_scatter = px.scatter(df, x='perf', y='weight',
-                                       size='amount', hover_name='name',
-                                       title="Risque vs Poids dans le Portfolio",
-                                       labels={'perf': 'Performance (%)', 'weight': 'Poids (%)'})
-                fig_scatter.add_hline(y=0, line_dash="dash", line_color="gray")
-                fig_scatter.add_vline(x=0, line_dash="dash", line_color="gray")
-                st.plotly_chart(fig_scatter, use_container_width=True)
-
-            # Nouvelle section pour la frontière efficiente
+            # Section Frontière Efficiente corrigée
             st.subheader("📈 Frontière Efficiente")
-            if 'symbol' in df.columns:
-                tickers = df['symbol'].tolist()
-                start_date = '2020-01-01'
-                end_date = datetime.now().strftime('%Y-%m-%d')
-
-                efficient_frontier_weights = EfficientFrontier.get_efficient_frontier(tickers, start_date, end_date)
-
-                if not efficient_frontier_weights.empty:
-                    st.write("Poids optimaux pour maximiser le ratio de Sharpe:")
-                    st.dataframe(efficient_frontier_weights.style.format({'weight': '{:.2%}'}))
+            
+            # Vérifier la présence de la colonne symbol
+            if 'symbol' in df.columns and len(df) >= 2:
+                # Nettoyer les symboles
+                symbols = df['symbol'].dropna().unique().tolist()
+                valid_symbols = [s for s in symbols if s and isinstance(s, str) and s.strip()]
+                
+                if len(valid_symbols) >= 2:
+                    # Interface utilisateur pour la configuration
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        # Période d'analyse
+                        periods = {
+                            "1 an": 365,
+                            "2 ans": 730,
+                            "3 ans": 1095,
+                            "5 ans": 1825
+                        }
+                        
+                        selected_period = st.selectbox("Période d'analyse", list(periods.keys()), index=1)
+                        days_back = periods[selected_period]
+                        
+                        end_date = datetime.now()
+                        start_date = end_date - timedelta(days=days_back)
+                        
+                        st.info(f"Période: {start_date.strftime('%Y-%m-%d')} à {end_date.strftime('%Y-%m-%d')}")
+                    
+                    with col2:
+                        # Sélection des tickers
+                        st.write("**Tickers sélectionnés:**")
+                        selected_tickers = st.multiselect(
+                            "Choisir les tickers pour la frontière efficiente",
+                            valid_symbols,
+                            default=valid_symbols[:10] if len(valid_symbols) > 10 else valid_symbols,
+                            help="Sélectionnez au moins 2 tickers"
+                        )
+                    
+                    # Bouton pour calculer
+                    if st.button("🔄 Calculer la frontière efficiente", key="calc_efficient_frontier"):
+                        if len(selected_tickers) >= 2:
+                            with st.spinner("Calcul de la frontière efficiente en cours..."):
+                                try:
+                                    # Calcul de la frontière efficiente
+                                    optimal_weights_df, metrics_ef = EfficientFrontier.get_efficient_frontier(
+                                        selected_tickers, 
+                                        start_date.strftime('%Y-%m-%d'), 
+                                        end_date.strftime('%Y-%m-%d')
+                                    )
+                                    
+                                    if not optimal_weights_df.empty:
+                                        # Affichage des résultats
+                                        st.success("✅ Frontière efficiente calculée avec succès!")
+                                        
+                                        # Métriques du portefeuille optimal
+                                        col1, col2, col3 = st.columns(3)
+                                        with col1:
+                                            st.metric("Rendement optimal", f"{metrics_ef['expected_return']:.2%}")
+                                        with col2:
+                                            st.metric("Volatilité optimale", f"{metrics_ef['volatility']:.2%}")
+                                        with col3:
+                                            st.metric("Ratio de Sharpe", f"{metrics_ef['sharpe_ratio']:.3f}")
+                                        
+                                        # Tableau des poids optimaux
+                                        st.write("**Poids optimaux pour maximiser le ratio de Sharpe:**")
+                                        
+                                        # Créer un DataFrame plus informatif
+                                        optimal_display = optimal_weights_df.copy()
+                                        optimal_display['weight_pct'] = optimal_display['weight'] * 100
+                                        
+                                        # Ajouter les poids actuels pour comparaison
+                                        current_weights = {}
+                                        for symbol in optimal_display.index:
+                                            current_weight = df[df['symbol'] == symbol]['weight'].iloc[0] if symbol in df['symbol'].values else 0
+                                            current_weights[symbol] = current_weight
+                                        
+                                        optimal_display['current_weight'] = [current_weights.get(symbol, 0) for symbol in optimal_display.index]
+                                        optimal_display['current_weight_pct'] = optimal_display['current_weight'] * 100
+                                        optimal_display['difference'] = optimal_display['weight_pct'] - optimal_display['current_weight_pct']
+                                        
+                                        # Affichage formaté
+                                        st.dataframe(
+                                            optimal_display[['weight_pct', 'current_weight_pct', 'difference']].style.format({
+                                                'weight_pct': '{:.2f}%',
+                                                'current_weight_pct': '{:.2f}%',
+                                                'difference': '{:+.2f}%'
+                                            }).background_gradient(subset=['difference'], cmap='RdYlGn', center=0),
+                                            column_config={
+                                                'weight_pct': 'Poids optimal (%)',
+                                                'current_weight_pct': 'Poids actuel (%)',
+                                                'difference': 'Différence (%)'
+                                            }
+                                        )
+                                        
+                                        # Graphique de comparaison
+                                        fig_comparison = go.Figure()
+                                        
+                                        fig_comparison.add_trace(go.Bar(
+                                            name='Poids optimal',
+                                            x=optimal_display.index,
+                                            y=optimal_display['weight_pct'],
+                                            marker_color='lightblue'
+                                        ))
+                                        
+                                        fig_comparison.add_trace(go.Bar(
+                                            name='Poids actuel',
+                                            x=optimal_display.index,
+                                            y=optimal_display['current_weight_pct'],
+                                            marker_color='lightcoral'
+                                        ))
+                                        
+                                        fig_comparison.update_layout(
+                                            title='Comparaison Poids Optimal vs Actuel',
+                                            xaxis_title='Actifs',
+                                            yaxis_title='Poids (%)',
+                                            barmode='group',
+                                            height=400
+                                        )
+                                        
+                                        st.plotly_chart(fig_comparison, use_container_width=True)
+                                        
+                                        # Génération de la courbe de frontière efficiente
+                                        with st.expander("📊 Courbe de la frontière efficiente"):
+                                            returns_ef, volatility_ef = EfficientFrontier.generate_efficient_frontier_curve(
+                                                selected_tickers,
+                                                start_date.strftime('%Y-%m-%d'),
+                                                end_date.strftime('%Y-%m-%d'),
+                                                num_portfolios=50
+                                            )
+                                            
+                                            if returns_ef and volatility_ef:
+                                                fig_ef = go.Figure()
+                                                
+                                                # Courbe de la frontière efficiente
+                                                fig_ef.add_trace(go.Scatter(
+                                                    x=volatility_ef,
+                                                    y=returns_ef,
+                                                    mode='lines+markers',
+                                                    name='Frontière Efficiente',
+                                                    line=dict(color='blue', width=2)
+                                                ))
+                                                
+                                                # Point du portefeuille optimal
+                                                fig_ef.add_trace(go.Scatter(
+                                                    x=[metrics_ef['volatility']],
+                                                    y=[metrics_ef['expected_return']],
+                                                    mode='markers',
+                                                    name='Portefeuille Optimal',
+                                                    marker=dict(color='red', size=10, symbol='star')
+                                                ))
+                                                
+                                                fig_ef.update_layout(
+                                                    title='Frontière Efficiente',
+                                                    xaxis_title='Volatilité (%)',
+                                                    yaxis_title='Rendement Espéré (%)',
+                                                    height=500
+                                                )
+                                                
+                                                st.plotly_chart(fig_ef, use_container_width=True)
+                                            else:
+                                                st.warning("Impossible de générer la courbe de frontière efficiente")
+                                        
+                                        # Stocker les résultats dans session_state pour éviter les recalculs
+                                        st.session_state.efficient_frontier_results = {
+                                            'optimal_weights': optimal_weights_df,
+                                            'metrics': metrics_ef,
+                                            'timestamp': datetime.now()
+                                        }
+                                        
+                                    else:
+                                        error_msg = metrics_ef.get('error', 'Erreur inconnue')
+                                        st.error(f"❌ Impossible de calculer la frontière efficiente: {error_msg}")
+                                        
+                                        # Suggestions d'amélioration
+                                        st.markdown("**Suggestions:**")
+                                        st.markdown("- Vérifiez que les symboles sont corrects")
+                                        st.markdown("- Essayez avec une période plus longue")
+                                        st.markdown("- Réduisez le nombre de tickers sélectionnés")
+                                        
+                                except Exception as e:
+                                    st.error(f"❌ Erreur lors du calcul: {str(e)}")
+                                    st.markdown("**Aide au débogage:**")
+                                    st.write(f"- Tickers sélectionnés: {selected_tickers}")
+                                    st.write(f"- Période: {start_date.strftime('%Y-%m-%d')} à {end_date.strftime('%Y-%m-%d')}")
+                        else:
+                            st.warning("⚠️ Veuillez sélectionner au moins 2 tickers")
+                    
+                    # Affichage des résultats précédents s'ils existent
+                    if hasattr(st.session_state, 'efficient_frontier_results') and st.session_state.efficient_frontier_results:
+                        results = st.session_state.efficient_frontier_results
+                        with st.expander("📋 Derniers résultats calculés"):
+                            st.write(f"**Calculé le:** {results['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
+                            st.dataframe(results['optimal_weights'].style.format({'weight': '{:.2%}'}))
                 else:
-                    st.warning("Impossible de calculer la frontière efficiente avec les données fournies.")
+                    st.warning("⚠️ Au moins 2 symboles valides sont nécessaires pour calculer la frontière efficiente")
+                    st.write(f"Symboles trouvés: {valid_symbols}")
             else:
-                st.error("La colonne 'symbol' est manquante dans le DataFrame.")
+                st.error("❌ La colonne 'symbol' est manquante ou le portefeuille contient moins de 2 actifs")
 
         except Exception as e:
             st.error(f"Une erreur est survenue lors de l'analyse de risque avancée : {str(e)}")
