@@ -1004,35 +1004,35 @@ class PortfolioManager:
         return True
     
     def update_portfolio_metrics(self):
-    """Met à jour toutes les métriques du portefeuille"""
-    if st.session_state.portfolio_df.empty:
-        return {'total_value': 0, 'portfolio_performance': 0}
+        """Met à jour toutes les métriques du portefeuille"""
+        if st.session_state.portfolio_df.empty:
+            return {'total_value': 0, 'portfolio_performance': 0}
 
-    df = st.session_state.portfolio_df
+        df = st.session_state.portfolio_df
 
-    # Calculs de base
-    total_value = df['amount'].sum()
+        # Calculs de base
+        total_value = df['amount'].sum()
 
     # Éviter la division par zéro
-    if total_value > 0:
-        df['weight'] = df['amount'] / total_value
-        df['weight_pct'] = df['weight'] * 100
-    else:
-        df['weight'] = 0
-        df['weight_pct'] = 0
+        if total_value > 0:
+            df['weight'] = df['amount'] / total_value
+            df['weight_pct'] = df['weight'] * 100
+        else:
+            df['weight'] = 0
+            df['weight_pct'] = 0
 
     # Calcul des performances
-    df['perf'] = ((df['lastPrice'] - df['buyingPrice']) / df['buyingPrice'] * 100).fillna(0)
+        df['perf'] = ((df['lastPrice'] - df['buyingPrice']) / df['buyingPrice'] * 100).fillna(0)
 
     # Performance pondérée
-    portfolio_perf = (df['weight'] * df['perf']).sum()
+        portfolio_perf = (df['weight'] * df['perf']).sum()
 
-    st.session_state.portfolio_df = df
+        st.session_state.portfolio_df = df
 
-    return {
-        'total_value': total_value,
-        'portfolio_performance': portfolio_perf
-    }
+        return {
+            'total_value': total_value,
+            'portfolio_performance': portfolio_perf
+        }
 
 
 def generate_recommendations(df: pd.DataFrame, concentration: Dict, 
