@@ -1476,114 +1476,44 @@ def create_advanced_risk_analysis(df: pd.DataFrame, ticker_data: Optional[List[D
             # Graphiques de risque
             col1, col2 = st.columns(2)
             with col1:
-                # Distribution des rendements
                 fig_hist = px.histogram(df, x='perf', nbins=20,
                                       title="Distribution des Rendements",
                                       labels={'perf': 'Performance (%)', 'count': 'Nombre d\'actifs'})
-                # Ajout des lignes VaR
                 fig_hist.add_vline(x=metrics['var_95']*100, line_dash="dash",
                                   line_color="red", annotation_text="VaR 95%")
                 fig_hist.add_vline(x=metrics['cvar_95']*100, line_dash="dash",
                                   line_color="darkred", annotation_text="CVaR 95%")
                 st.plotly_chart(fig_hist, use_container_width=True)
-
             with col2:
-                # Analyse risque-rendement
                 fig_scatter = px.scatter(df, x='perf', y='weight',
                                        size='amount', hover_name='name',
                                        title="Risque vs Poids dans le Portfolio",
                                        labels={'perf': 'Performance (%)', 'weight': 'Poids (%)'})
-                # Ligne de référence à 0%
                 fig_scatter.add_hline(y=0, line_dash="dash", line_color="gray")
                 fig_scatter.add_vline(x=0, line_dash="dash", line_color="gray")
                 st.plotly_chart(fig_scatter, use_container_width=True)
 
-            # Analyse des risques par quintiles
-            df_risk = df.copy()
-            df_risk['risk_score'] = np.abs(df_risk['perf'])
-            if len(df_risk) >= 5:
-                try:
-                    df_risk['risk_quintile'] = pd.qcut(df_risk['risk_score'], 5,
-                                                     labels=['Très Faible', 'Faible', 'Moyen', 'Élevé', 'Très Élevé'])
-                except ValueError:
-                    # Si pas assez de valeurs uniques, utiliser des seuils fixes
-                    df_risk['risk_quintile'] = pd.cut(df_risk['risk_score'],
-                                                    bins=[0, 5, 10, 20, 50, 100],
-                                                    labels=['Très Faible', 'Faible', 'Moyen', 'Élevé', 'Très Élevé'],
-                                                    include_lowest=True)
+            # Nouvelle section pour la frontière efficiente
+            st.subheader("📈 Frontière Efficiente")
+            if 'symbol' in df.columns:
+                tickers = df['symbol'].tolist()
+                start_date = '2020-01-01'
+                end_date = datetime.now().strftime('%Y-%m-%d')
+
+                efficient_frontier_weights = EfficientFrontier.get_efficient_frontier(tickers, start_date, end_date)
+
+                if not efficient_frontier_weights.empty:
+                    st.write("Poids optimaux pour maximiser le ratio de Sharpe:")
+                    st.dataframe(efficient_frontier_weights.style.format({'weight': '{:.2%}'}))
+                else:
+                    st.warning("Impossible de calculer la frontière efficiente avec les données fournies.")
             else:
-                df_risk['risk_quintile'] = 'Moyen'
-
-            risk_analysis = df_risk.groupby('risk_quintile').agg({
-                'weight': 'sum',
-                'amount': 'sum',
-                'name': 'count'
-            }).round(3)
-            risk_analysis.columns = ['Poids', 'Montant', 'Nombre']
-            risk_analysis['Poids_Pct'] = risk_analysis['Poids'] * 100
-
-            st.markdown("#### 📊 Répartition par Niveau de Risque")
-            col1, col2 = st.columns(2)
-            with col1:
-                st.dataframe(risk_analysis.style.format({
-                    'Poids': '{:.1%}',
-                    'Montant': '{:,.0f}',
-                    'Poids_Pct': '{:.1f}%'
-                }))
-            with col2:
-                if len(risk_analysis) > 1:
-                    fig_risk = px.pie(risk_analysis, values='Poids_Pct', names=risk_analysis.index,
-                                    title="Exposition par Niveau de Risque")
-                    st.plotly_chart(fig_risk, use_container_width=True)
-
-            # Interprétation des métriques
-            st.markdown("#### 📚 Interprétation des Métriques")
-            interpretations = {
-                'sharpe_ratio': {
-                    'desc': 'Ratio de Sharpe',
-                    'interpretation': 'Mesure le rendement excédentaire par unité de risque. >1.0 = bon, >2.0 = excellent.',
-                    'value': metrics['sharpe_ratio']
-                },
-                'sortino_ratio': {
-                    'desc': 'Ratio de Sortino',
-                    'interpretation': 'Comme Sharpe mais ne pénalise que la volatilité négative. >1.5 = bon.',
-                    'value': metrics['sortino_ratio']
-                },
-                'max_drawdown': {
-                    'desc': 'Drawdown Maximum',
-                    'interpretation': 'Perte maximale potentielle. <10% = faible risque, >20% = risque élevé.',
-                    'value': metrics['max_drawdown']
-                },
-                'var_95': {
-                    'desc': 'VaR 95%',
-                    'interpretation': 'Perte maximale attendue dans 95% des cas sur la période.',
-                    'value': metrics['var_95']
-                }
-            }
-            for key, info in interpretations.items():
-                with st.expander(f"ℹ️ {info['desc']}: {info['value']:.3f}"):
-                    st.write(info['interpretation'])
+                st.error("La colonne 'symbol' est manquante dans le DataFrame.")
 
         except Exception as e:
             st.error(f"Une erreur est survenue lors de l'analyse de risque avancée : {str(e)}")
     else:
         st.info("Données insuffisantes pour l'analyse de risque avancée")
-    st.subheader("📈 Frontière Efficiente")
-
-    if 'symbol' in df.columns:
-        tickers = df['symbol'].tolist()
-        start_date = '2020-01-01'
-        end_date = '2023-01-01'
-
-        efficient_frontier_weights = EfficientFrontier.get_efficient_frontier(tickers, start_date, end_date)
-
-        if not efficient_frontier_weights.empty:
-            st.write("Poids optimaux pour maximiser le ratio de Sharpe:")
-            st.dataframe(efficient_frontier_weights.style.format({'weight': '{:.2%}'}))
-        else:
-            st.warning("Impossible de calculer la frontière efficiente avec les données fournies.")
-    else:
-        st.error("La colonne 'symbol' est manquante dans le DataFrame.")
 # Fonction pour remplacer create_risk_analysis dans le code principal
 def create_risk_analysis(df: pd.DataFrame):
     """Appelle la nouvelle analyse de risque avancée"""
