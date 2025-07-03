@@ -964,15 +964,15 @@ class PortfolioManager:
             st.session_state.original_df = pd.DataFrame()
     
     def add_stock_to_portfolio(self, ticker_data: Dict, quantity: int, buying_price: float = None, purchase_date: str = None):
-    """Ajoute une action au portefeuille avec prix d'achat personnalisable et date d'achat"""
+        """Ajoute une action au portefeuille avec prix d'achat personnalisable et date d'achat"""
 
-    # Utilise le prix d'achat fourni ou le prix actuel par défaut
-    purchase_price = buying_price if buying_price is not None else ticker_data['price']
+        # Utilise le prix d'achat fourni ou le prix actuel par défaut
+        purchase_price = buying_price if buying_price is not None else ticker_data['price']
 
     # Utilise la date d'achat fournie ou la date actuelle par défaut
-    purchase_date = purchase_date if purchase_date is not None else datetime.now().strftime("%Y-%m-%d")
+        purchase_date = purchase_date if purchase_date is not None else datetime.now().strftime("%Y-%m-%d")
 
-    new_row = {
+        new_row = {
         'name': ticker_data['name'],
         'symbol': ticker_data['symbol'],
         'isin': ticker_data.get('isin', 'Unknown'),
@@ -993,46 +993,46 @@ class PortfolioManager:
     }
 
     # Ajout au DataFrame
-    if st.session_state.portfolio_df.empty:
-        st.session_state.portfolio_df = pd.DataFrame([new_row])
-    else:
-        st.session_state.portfolio_df = pd.concat([
-            st.session_state.portfolio_df,
-            pd.DataFrame([new_row])
-        ], ignore_index=True)
-
-    return True
-    
-    def update_portfolio_metrics(self):
-        """Met à jour toutes les métriques du portefeuille"""
         if st.session_state.portfolio_df.empty:
-            return {'total_value': 0, 'portfolio_performance': 0}
+            st.session_state.portfolio_df = pd.DataFrame([new_row])
+        else:
+            st.session_state.portfolio_df = pd.concat([
+                st.session_state.portfolio_df,
+                pd.DataFrame([new_row])
+            ], ignore_index=True)
+
+        return True
+    
+        def update_portfolio_metrics(self):
+            """Met à jour toutes les métriques du portefeuille"""
+            if st.session_state.portfolio_df.empty:
+                return {'total_value': 0, 'portfolio_performance': 0}
         
-        df = st.session_state.portfolio_df
+            df = st.session_state.portfolio_df
         
         # Calculs de base
-        total_value = df['amount'].sum()
+            total_value = df['amount'].sum()
         
         # Éviter la division par zéro
-        if total_value > 0:
-            df['weight'] = df['amount'] / total_value
-            df['weight_pct'] = df['weight'] * 100
-        else:
-            df['weight'] = 0
-            df['weight_pct'] = 0
+            if total_value > 0:
+                df['weight'] = df['amount'] / total_value
+                df['weight_pct'] = df['weight'] * 100
+            else:
+                df['weight'] = 0
+                df['weight_pct'] = 0
         
         # Calcul des performances
-        df['perf'] = ((df['lastPrice'] - df['buyingPrice']) / df['buyingPrice'] * 100).fillna(0)
+            df['perf'] = ((df['lastPrice'] - df['buyingPrice']) / df['buyingPrice'] * 100).fillna(0)
         
         # Performance pondérée
-        portfolio_perf = (df['weight'] * df['perf']).sum()
+            portfolio_perf = (df['weight'] * df['perf']).sum()
         
-        st.session_state.portfolio_df = df
+            st.session_state.portfolio_df = df
         
-        return {
-            'total_value': total_value,
-            'portfolio_performance': portfolio_perf
-        }
+            return {
+                'total_value': total_value,
+                'portfolio_performance': portfolio_perf
+            }
 
 def generate_recommendations(df: pd.DataFrame, concentration: Dict, 
                            sector_analysis: pd.DataFrame, geo_analysis: pd.DataFrame):
