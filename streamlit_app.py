@@ -1156,6 +1156,7 @@ def enhance_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     column_mapping = {
         'name': ['name', 'nom', 'title', 'security', 'instrument'],
         'quantity': ['quantity', 'qty', 'quantite', 'shares', 'units'],
+        'date':['purchase_date', 'date']
         'buyingPrice': ['buyingPrice', 'prix_achat', 'purchase_price', 'cost'],
         'lastPrice': ['lastPrice', 'prix_actuel', 'current_price', 'market_price'],
         'isin': ['isin', 'ISIN'],
