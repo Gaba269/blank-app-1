@@ -1616,7 +1616,7 @@ def create_advanced_risk_analysis(df: pd.DataFrame, ticker_data: Optional[List[D
     if len(df) > 0:
         try:
             # Calcul des métriques avancées (votre code existant)
-            from your_existing_module import RiskPerformanceAnalyzer  # Remplacez par votre import
+            
             metrics = RiskPerformanceAnalyzer.calculate_advanced_metrics(df)
 
             # Affichage des métriques principales (votre code existant)
