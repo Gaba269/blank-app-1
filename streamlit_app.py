@@ -2266,58 +2266,58 @@ def main():
         st.subheader("➕ Ajouter une action")
 
     # Recherche de ticker
-    search_query = st.text_input("Rechercher un ticker ou nom d'entreprise")
+        search_query = st.text_input("Rechercher un ticker ou nom d'entreprise")
 
-    if search_query:
-        with st.spinner("Recherche en cours..."):
-            search_results = TickerService.search_tickers(search_query, limit=5)
+        if search_query:
+            with st.spinner("Recherche en cours..."):
+                search_results = TickerService.search_tickers(search_query, limit=5)
 
-        if search_results:
-            # Sélection du ticker
-            ticker_options = [f"{result['symbol']} - {result['name']}" for result in search_results]
-            selected_ticker_idx = st.selectbox(
-                "Sélectionner un ticker",
-                range(len(ticker_options)),
-                format_func=lambda x: ticker_options[x]
-            )
-
-            selected_ticker = search_results[selected_ticker_idx]
-
-            # Validation du ticker
-            with st.spinner("Validation du ticker..."):
-                ticker_data = TickerService.validate_ticker(selected_ticker['symbol'])
-
-            if ticker_data['valid']:
-                # Affichage des informations du ticker
-                st.info(f"**{ticker_data['name']}**\nPrix actuel: {ticker_data['price']:.2f} {ticker_data['currency']}")
-
-                # Saisie de la quantité
-                quantity = st.number_input("Quantité", min_value=1, value=1)
-
-                # NOUVELLE SECTION : Choix du prix d'achat
-                st.markdown("**Prix d'achat:**")
-                price_option = st.radio(
-                    "Choisir le prix d'achat",
-                    ["Prix actuel", "Prix personnalisé"],
-                    key="price_option"
+            if search_results:
+                # Sélection du ticker
+                ticker_options = [f"{result['symbol']} - {result['name']}" for result in search_results]
+                selected_ticker_idx = st.selectbox(
+                    "Sélectionner un ticker",
+                    range(len(ticker_options)),
+                    format_func=lambda x: ticker_options[x]
                 )
 
-                buying_price = None
-                if price_option == "Prix actuel":
-                    buying_price = ticker_data['price']
-                    st.success(f"✅ Prix d'achat: {buying_price:.2f} {ticker_data['currency']} (prix actuel)")
-                else:
-                    buying_price = st.number_input(
-                        f"Prix d'achat personnalisé ({ticker_data['currency']})",
-                        min_value=0.01,
-                        value=ticker_data['price'],
-                        step=0.01,
-                        format="%.2f"
+                selected_ticker = search_results[selected_ticker_idx]
+
+                # Validation du ticker
+                with st.spinner("Validation du ticker..."):
+                    ticker_data = TickerService.validate_ticker(selected_ticker['symbol'])
+
+                if ticker_data['valid']:
+                    # Affichage des informations du ticker
+                    st.info(f"**{ticker_data['name']}**\nPrix actuel: {ticker_data['price']:.2f} {ticker_data['currency']}")
+
+                # Saisie de la quantité
+                    quantity = st.number_input("Quantité", min_value=1, value=1)
+
+               
+                    st.markdown("**Prix d'achat:**")
+                    price_option = st.radio(
+                        "Choisir le prix d'achat",
+                        ["Prix actuel", "Prix personnalisé"],
+                        key="price_option"
                     )
 
+                    buying_price = None
+                    if price_option == "Prix actuel":
+                        buying_price = ticker_data['price']
+                        st.success(f"✅ Prix d'achat: {buying_price:.2f} {ticker_data['currency']} (prix actuel)")
+                    else:
+                            buying_price = st.number_input(
+                            f"Prix d'achat personnalisé ({ticker_data['currency']})",
+                            min_value=0.01,
+                            value=ticker_data['price'],
+                            step=0.01,
+                            format="%.2f"
+                        )
+
                 # Ajout de la date du jour
-                purchase_date = datetime.now().strftime("%Y-%m-%d")
-                st.write(f"**Date d'achat:** {purchase_date}")
+                    purchase_date = datetime.now().strftime("%Y-%m-%d")
+                    st.write(f"**Date d'achat:** {purchase_date}")
 
                 # Résumé de l'ajout
                 with st.expander("📋 Résumé de l'ajout"):
