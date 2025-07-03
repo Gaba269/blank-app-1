@@ -955,47 +955,80 @@ class DiversificationAnalyzer:
         return geo_analysis.sort_values('Weight', ascending=False)
 
 class PortfolioManager:
-    """Gestionnaire principal du portefeuille"""
+    """Gestionnaire de portefeuille avec calcul des rendements annualisés"""
     
     def __init__(self):
         if 'portfolio_df' not in st.session_state:
             st.session_state.portfolio_df = pd.DataFrame()
-        if 'original_df' not in st.session_state:
-            st.session_state.original_df = pd.DataFrame()
     
-    
+    @staticmethod
+    def calculate_annualized_return(initial_value: float, final_value: float, days_held: int) -> float:
+        """
+        Calcule le rendement annualisé
+        
+        Args:
+            initial_value: Valeur initiale de l'investissement
+            final_value: Valeur finale de l'investissement
+            days_held: Nombre de jours de détention
+        
+        Returns:
+            Rendement annualisé en pourcentage
+        """
+        if initial_value <= 0 or days_held <= 0:
+            return 0.0
+        
+        # Calcul du rendement total
+        total_return = (final_value / initial_value) - 1
+        
+        # Conversion en années
+        years_held = days_held / 365.25
+        
+        # Calcul du rendement annualisé : (1 + rendement_total)^(1/années) - 1
+        if years_held > 0:
+            try:
+                annualized_return = ((1 + total_return) ** (1 / years_held)) - 1
+            except (OverflowError, ZeroDivisionError):
+                annualized_return = total_return
+        else:
+            annualized_return = total_return
+        
+        return annualized_return * 100  # Retour en pourcentage
+
     def add_stock_to_portfolio(self, ticker_data: Dict, quantity: int, buying_price: float = None, purchase_date=None):
         """Ajoute une action au portefeuille avec prix d'achat personnalisable"""
         # Utilise le prix d'achat fourni ou le prix actuel par défaut
         purchase_price = buying_price if buying_price is not None else ticker_data['price']
-    
-    # Si pas de date d'achat fournie, utiliser la date actuelle
+        
+        # Si pas de date d'achat fournie, utiliser la date actuelle
         if purchase_date is None:
             purchase_date = datetime.now().date()
         elif isinstance(purchase_date, str):
-            purchase_date = datetime.strptime(purchase_date, '%Y-%m-%d').date()
-    
+            try:
+                purchase_date = datetime.strptime(purchase_date, '%Y-%m-%d').date()
+            except ValueError:
+                purchase_date = datetime.now().date()
+        
         new_row = {
             'name': ticker_data['name'],
             'symbol': ticker_data['symbol'],
             'isin': ticker_data.get('isin', 'Unknown'),
             "purchase_date": purchase_date,
             'quantity': quantity,
-            'buyingPrice': purchase_price,  # Prix d'achat personnalisé ou actuel
-            'lastPrice': ticker_data['price'],  # Prix actuel du marché
+            'buyingPrice': purchase_price,
+            'lastPrice': ticker_data['price'],
             'currency': ticker_data.get('currency', 'USD'),
             'exchange': ticker_data.get('exchange', 'Unknown'),
             'sector': ticker_data.get('sector', 'Unknown'),
             'industry': ticker_data.get('industry', 'Unknown'),
             'asset_type': ticker_data.get('type', 'Stock'),
             'intradayVariation': 0.0,
-            'amount': quantity * ticker_data['price'],  # Valeur actuelle
-            'amountVariation': quantity * (ticker_data['price'] - purchase_price),  # Plus/moins-value
+            'amount': quantity * ticker_data['price'],
+            'amountVariation': quantity * (ticker_data['price'] - purchase_price),
             'variation': ((ticker_data['price'] - purchase_price) / purchase_price * 100) if purchase_price > 0 else 0.0,
-            'Tickers': ticker_data['symbol']  # Pour compatibilité
+            'Tickers': ticker_data['symbol']
         }
-    
-    # Ajout au DataFrame
+        
+        # Ajout au DataFrame
         if st.session_state.portfolio_df.empty:
             st.session_state.portfolio_df = pd.DataFrame([new_row])
         else:
@@ -1003,7 +1036,7 @@ class PortfolioManager:
                 st.session_state.portfolio_df, 
                 pd.DataFrame([new_row])
             ], ignore_index=True)
-    
+        
         return True
     
     def update_portfolio_metrics(self):
@@ -1018,11 +1051,11 @@ class PortfolioManager:
         
         df = st.session_state.portfolio_df.copy()
         current_date = datetime.now().date()
-    
-    # Calculs de base
+        
+        # Calculs de base
         total_value = df['amount'].sum()
-    
-    # Éviter la division par zéro
+        
+        # Éviter la division par zéro
         if total_value > 0:
             df['weight'] = df['amount'] / total_value
             df['weight_pct'] = df['weight'] * 100
@@ -1030,44 +1063,48 @@ class PortfolioManager:
             df['weight'] = 0
             df['weight_pct'] = 0
         
-    # Calcul des performances simples
+        # Calcul des performances simples
         df['perf'] = ((df['lastPrice'] - df['buyingPrice']) / df['buyingPrice'] * 100).fillna(0)
-    
-    # Calcul des jours de détention pour chaque position
+        
+        # Calcul des jours de détention pour chaque position
         df['days_held'] = df['purchase_date'].apply(
-            lambda x: (current_date - x).days if pd.notna(x) else 1
+            lambda x: max(1, (current_date - x).days) if pd.notna(x) else 1
         )
-    
-    # Calcul des rendements annualisés pour chaque position
-        df['annualized_return'] = df.apply(
-            lambda row: calculate_annualized_return(
-                row['buyingPrice'] * row['quantity'],  # Valeur initiale
-                row['lastPrice'] * row['quantity'],    # Valeur actuelle
-                row['days_held']
-            ), axis=1
-        )
-    
-    # Performance pondérée simple
+        
+        # Calcul des rendements annualisés pour chaque position
+        annualized_returns = []
+        for _, row in df.iterrows():
+            initial_val = row['buyingPrice'] * row['quantity']
+            final_val = row['lastPrice'] * row['quantity']
+            days = row['days_held']
+            
+            ann_return = self.calculate_annualized_return(initial_val, final_val, days)
+            annualized_returns.append(ann_return)
+        
+        df['annualized_return'] = annualized_returns
+        
+        # Performance pondérée simple
         portfolio_perf = (df['weight'] * df['perf']).sum()
-    
-    # Rendement annualisé pondéré du portefeuille
+        
+        # Rendement annualisé pondéré du portefeuille
         weighted_annualized_return = (df['weight'] * df['annualized_return']).sum()
-    
-    # Calcul alternatif : rendement annualisé du portefeuille total
+        
+        # Calcul alternatif : rendement annualisé du portefeuille total
         total_initial_value = (df['buyingPrice'] * df['quantity']).sum()
         total_current_value = (df['lastPrice'] * df['quantity']).sum()
-    
-    # Moyenne pondérée des jours de détention
+        
+        # Moyenne pondérée des jours de détention
         weighted_days_held = (df['weight'] * df['days_held']).sum()
-    
-        portfolio_annualized_return = calculate_annualized_return(
+        
+        portfolio_annualized_return = self.calculate_annualized_return(
             total_initial_value,
             total_current_value,
-            max(1, int(weighted_days_held))  # Éviter les valeurs nulles
+            max(1, int(weighted_days_held))
         )
-    
+        
+        # Mise à jour du DataFrame dans session_state
         st.session_state.portfolio_df = df
-    
+        
         return {
             'total_value': total_value,
             'portfolio_performance': portfolio_perf,
@@ -1078,123 +1115,141 @@ class PortfolioManager:
             'weighted_days_held': weighted_days_held
         }
 
-def get_portfolio_annualized_metrics(self) -> Dict:
-    """Retourne les métriques annualisées détaillées du portefeuille"""
-    metrics = self.update_portfolio_metrics()
-    df = st.session_state.portfolio_df
-    
-    if df.empty:
+    def get_portfolio_annualized_metrics(self) -> Dict:
+        """Retourne les métriques annualisées détaillées du portefeuille"""
+        metrics = self.update_portfolio_metrics()
+        df = st.session_state.portfolio_df
+        
+        if df.empty:
+            return metrics
+        
+        # Calculs supplémentaires pour l'analyse
+        current_date = datetime.now().date()
+        
+        # Statistiques temporelles
+        min_purchase_date = df['purchase_date'].min()
+        max_purchase_date = df['purchase_date'].max()
+        
+        portfolio_age_days = (current_date - min_purchase_date).days if pd.notna(min_purchase_date) else 0
+        portfolio_age_years = portfolio_age_days / 365.25
+        
+        # Volatilité annualisée (estimation basée sur les performances individuelles)
+        if len(df) > 1:
+            individual_returns = df['annualized_return'].values
+            portfolio_volatility = np.std(individual_returns)
+        else:
+            portfolio_volatility = 0
+        
+        # Sharpe ratio estimé (avec taux sans risque de 2%)
+        risk_free_rate = 2.0
+        excess_return = metrics['annualized_return'] - risk_free_rate
+        sharpe_ratio = excess_return / portfolio_volatility if portfolio_volatility > 0 else 0
+        
+        metrics.update({
+            'portfolio_age_days': portfolio_age_days,
+            'portfolio_age_years': portfolio_age_years,
+            'min_purchase_date': min_purchase_date,
+            'max_purchase_date': max_purchase_date,
+            'portfolio_volatility': portfolio_volatility,
+            'sharpe_ratio': sharpe_ratio,
+            'risk_free_rate': risk_free_rate,
+            'excess_return': excess_return
+        })
+        
         return metrics
-    
-    # Calculs supplémentaires pour l'analyse
-    current_date = datetime.now().date()
-    
-    # Statistiques temporelles
-    min_purchase_date = df['purchase_date'].min()
-    max_purchase_date = df['purchase_date'].max()
-    
-    portfolio_age_days = (current_date - min_purchase_date).days if pd.notna(min_purchase_date) else 0
-    portfolio_age_years = portfolio_age_days / 365.25
-    
-    # Volatilité annualisée (estimation basée sur les performances individuelles)
-    if len(df) > 1:
-        individual_returns = df['annualized_return'].values
-        portfolio_volatility = np.std(individual_returns)
-    else:
-        portfolio_volatility = 0
-    
-    # Sharpe ratio estimé (avec taux sans risque de 2%)
-    risk_free_rate = 2.0
-    excess_return = metrics['annualized_return'] - risk_free_rate
-    sharpe_ratio = excess_return / portfolio_volatility if portfolio_volatility > 0 else 0
-    
-    metrics.update({
-        'portfolio_age_days': portfolio_age_days,
-        'portfolio_age_years': portfolio_age_years,
-        'min_purchase_date': min_purchase_date,
-        'max_purchase_date': max_purchase_date,
-        'portfolio_volatility': portfolio_volatility,
-        'sharpe_ratio': sharpe_ratio,
-        'risk_free_rate': risk_free_rate,
-        'excess_return': excess_return
-    })
-    
-    return metrics
 
-def display_annualized_performance(self):
-    """Affiche les performances annualisées dans Streamlit"""
-    metrics = self.get_portfolio_annualized_metrics()
-    
-    if metrics['total_value'] == 0:
-        st.warning("Aucune position dans le portefeuille")
-        return
-    
-    # Métriques principales
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric(
-            "Valeur totale", 
-            f"${metrics['total_value']:,.2f}",
-            f"${metrics['total_current_value'] - metrics['total_initial_value']:,.2f}"
-        )
-    
-    with col2:
-        st.metric(
-            "Performance totale", 
-            f"{metrics['portfolio_performance']:.2f}%"
-        )
-    
-    with col3:
-        st.metric(
-            "Rendement annualisé", 
-            f"{metrics['annualized_return']:.2f}%"
-        )
-    
-    with col4:
-        st.metric(
-            "Ratio de Sharpe", 
-            f"{metrics['sharpe_ratio']:.2f}"
-        )
-    
-    # Détails supplémentaires
-    st.subheader("Détails des performances")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.write(f"**Âge du portefeuille:** {metrics['portfolio_age_years']:.1f} ans")
-        st.write(f"**Volatilité estimée:** {metrics['portfolio_volatility']:.2f}%")
-        st.write(f"**Rendement excédentaire:** {metrics['excess_return']:.2f}%")
-    
-    with col2:
-        st.write(f"**Première acquisition:** {metrics['min_purchase_date']}")
-        st.write(f"**Dernière acquisition:** {metrics['max_purchase_date']}")
-        st.write(f"**Taux sans risque:** {metrics['risk_free_rate']:.1f}%")
-    
-    # Tableau détaillé des positions
-    if not st.session_state.portfolio_df.empty:
-        st.subheader("Détail par position")
+    def display_annualized_performance(self):
+        """Affiche les performances annualisées dans Streamlit"""
+        metrics = self.get_portfolio_annualized_metrics()
         
-        display_df = st.session_state.portfolio_df[[
-            'symbol', 'quantity', 'buyingPrice', 'lastPrice', 
-            'perf', 'annualized_return', 'days_held', 'weight_pct'
-        ]].copy()
+        if metrics['total_value'] == 0:
+            st.warning("Aucune position dans le portefeuille")
+            return
         
-        display_df.columns = [
-            'Symbole', 'Quantité', 'Prix d\'achat', 'Prix actuel',
-            'Performance (%)', 'Rendement annualisé (%)', 'Jours détention', 'Poids (%)'
-        ]
+        # Métriques principales
+        col1, col2, col3, col4 = st.columns(4)
         
-        # Formatage des colonnes
-        display_df['Prix d\'achat'] = display_df['Prix d\'achat'].apply(lambda x: f"${x:.2f}")
-        display_df['Prix actuel'] = display_df['Prix actuel'].apply(lambda x: f"${x:.2f}")
-        display_df['Performance (%)'] = display_df['Performance (%)'].apply(lambda x: f"{x:.2f}%")
-        display_df['Rendement annualisé (%)'] = display_df['Rendement annualisé (%)'].apply(lambda x: f"{x:.2f}%")
-        display_df['Poids (%)'] = display_df['Poids (%)'].apply(lambda x: f"{x:.1f}%")
+        with col1:
+            st.metric(
+                "Valeur totale", 
+                f"${metrics['total_value']:,.2f}",
+                f"${metrics.get('total_current_value', 0) - metrics.get('total_initial_value', 0):,.2f}"
+            )
         
-        st.dataframe(display_df, use_container_width=True)
+        with col2:
+            st.metric(
+                "Performance totale", 
+                f"{metrics['portfolio_performance']:.2f}%"
+            )
+        
+        with col3:
+            st.metric(
+                "Rendement annualisé", 
+                f"{metrics['annualized_return']:.2f}%"
+            )
+        
+        with col4:
+            st.metric(
+                "Ratio de Sharpe", 
+                f"{metrics['sharpe_ratio']:.2f}"
+            )
+        
+        # Détails supplémentaires
+        st.subheader("Détails des performances")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write(f"**Âge du portefeuille:** {metrics['portfolio_age_years']:.1f} ans")
+            st.write(f"**Volatilité estimée:** {metrics['portfolio_volatility']:.2f}%")
+            st.write(f"**Rendement excédentaire:** {metrics['excess_return']:.2f}%")
+        
+        with col2:
+            st.write(f"**Première acquisition:** {metrics['min_purchase_date']}")
+            st.write(f"**Dernière acquisition:** {metrics['max_purchase_date']}")
+            st.write(f"**Taux sans risque:** {metrics['risk_free_rate']:.1f}%")
+        
+        # Tableau détaillé des positions
+        if not st.session_state.portfolio_df.empty:
+            st.subheader("Détail par position")
+            
+            display_df = st.session_state.portfolio_df[[
+                'symbol', 'quantity', 'buyingPrice', 'lastPrice', 
+                'perf', 'annualized_return', 'days_held', 'weight_pct'
+            ]].copy()
+            
+            display_df.columns = [
+                'Symbole', 'Quantité', 'Prix d\'achat', 'Prix actuel',
+                'Performance (%)', 'Rendement annualisé (%)', 'Jours détention', 'Poids (%)'
+            ]
+            
+            # Formatage des colonnes
+            display_df['Prix d\'achat'] = display_df['Prix d\'achat'].apply(lambda x: f"${x:.2f}")
+            display_df['Prix actuel'] = display_df['Prix actuel'].apply(lambda x: f"${x:.2f}")
+            display_df['Performance (%)'] = display_df['Performance (%)'].apply(lambda x: f"{x:.2f}%")
+            display_df['Rendement annualisé (%)'] = display_df['Rendement annualisé (%)'].apply(lambda x: f"{x:.2f}%")
+            display_df['Poids (%)'] = display_df['Poids (%)'].apply(lambda x: f"{x:.1f}%")
+            
+            st.dataframe(display_df, use_container_width=True)
 
+    def get_risk_performance_metrics(self):
+        """Calcule les métriques de risque et performance pour integration avec RiskPerformanceAnalyzer"""
+        if st.session_state.portfolio_df.empty:
+            return pd.DataFrame()
+        
+        df = st.session_state.portfolio_df.copy()
+        
+        # Préparation des données pour RiskPerformanceAnalyzer
+        df['perf'] = ((df['lastPrice'] - df['buyingPrice']) / df['buyingPrice'] * 100).fillna(0)
+        
+        # Calcul des poids
+        total_value = df['amount'].sum()
+        if total_value > 0:
+            df['weight'] = (df['amount'] / total_value) * 100
+        else:
+            df['weight'] = 0
+        
+        return df[['symbol', 'perf', 'weight']]
 def generate_recommendations(df: pd.DataFrame, concentration: Dict, 
                            sector_analysis: pd.DataFrame, geo_analysis: pd.DataFrame):
     """Génère des recommandations personnalisées"""
