@@ -1246,7 +1246,8 @@ def display_portfolio_summary(df: pd.DataFrame):
             'Poids (%)': '{:.1f}',
             'Performance (%)': '{:.2f}'
         }), use_container_width=True)
-rom scipy.optimize import minimize
+
+from scipy.optimize import minimize
 
 class EfficientFrontier:
     @staticmethod
