@@ -2304,8 +2304,8 @@ def main():
                     quantity = st.number_input("Quantité", min_value=1, value=1)
 
                     #Saisie de la date
-                    date=st.date_input(f"Purchase Date for {row['symbol']}",value=datetime.now() )
-                    
+     
+                    date =st.date_input("Date d'achat", datetime.now)
                     # NOUVELLE SECTION : Choix du prix d'achat
                     st.markdown("**Prix d'achat:**")
                     price_option = st.radio(
@@ -2349,7 +2349,7 @@ def main():
                         st.write(f"**Prix actuel unitaire:** {ticker_data['price']:.2f} {ticker_data['currency']}")
                         st.write(f"**Coût total d'achat:** {total_cost:.2f} {ticker_data['currency']}")
                         st.write(f"**Valeur actuelle:** {current_value:.2f} {ticker_data['currency']}")
-                        
+                        st.write(f"**Date:** {date}")
                         pnl = current_value - total_cost
                         if pnl != 0:
                             pnl_color = "green" if pnl > 0 else "red"
