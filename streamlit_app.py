@@ -2474,7 +2474,7 @@ def main():
                 'name': 'Nom',
                 'symbol': 'Symbole',
                 'quantity': 'Quantité',
-                "date d'achat": 'Date',
+                "purchase_date": 'Date',
                 'buyingPrice': "Prix d'achat",
                 'lastPrice': 'Prix actuel',
                 'amount': 'Montant (€)',
