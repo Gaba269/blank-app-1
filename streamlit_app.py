@@ -1535,7 +1535,7 @@ class RiskPerformanceAnalyzer:
             return 1.0
 
     @staticmethod
-def calculate_advanced_metrics(df: pd.DataFrame, period_days: int = 252) -> Dict:
+    def calculate_advanced_metrics(df: pd.DataFrame, period_days: int = 252) -> Dict:
     """
     Calcule les métriques avancées de risque et performance
     """
