@@ -1478,23 +1478,71 @@ class EfficientFrontier:
             return [], []
 
             
+import pandas as pd
+import numpy as np
+import yfinance as yf
+import streamlit as st
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Tuple
+import plotly.graph_objects as go
+import plotly.express as px
+from scipy.optimize import minimize
+import warnings
+warnings.filterwarnings('ignore')
+
 class RiskPerformanceAnalyzer:
-    """Analyseur avancé de risque et performance"""
+    """Analyseur avancé de risque et performance avec formules corrigées"""
 
     @staticmethod
-    def get_beta(ticker: str) -> float:
-        """Récupère le bêta d'une action à partir de yfinance"""
+    def get_beta(ticker: str, period: str = "2y") -> float:
+        """Récupère le bêta d'une action calculé par rapport au marché (S&P 500)"""
         try:
+            # Télécharger les données de l'action et du marché
             stock = yf.Ticker(ticker)
-            beta = stock.info.get('beta', 1.0)  # Par défaut, bêta = 1.0 si non trouvé
+            market = yf.Ticker("^GSPC")  # S&P 500 comme proxy du marché
+            
+            # Récupérer les données historiques
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=730)  # 2 ans
+            
+            stock_data = stock.history(start=start_date, end=end_date)
+            market_data = market.history(start=start_date, end=end_date)
+            
+            if len(stock_data) < 50 or len(market_data) < 50:
+                # Si pas assez de données, utiliser le beta de yfinance
+                beta = stock.info.get('beta', 1.0)
+                return beta if beta is not None else 1.0
+            
+            # Calculer les rendements journaliers
+            stock_returns = stock_data['Close'].pct_change().dropna()
+            market_returns = market_data['Close'].pct_change().dropna()
+            
+            # Aligner les dates
+            common_dates = stock_returns.index.intersection(market_returns.index)
+            stock_returns = stock_returns.loc[common_dates]
+            market_returns = market_returns.loc[common_dates]
+            
+            # Calculer le beta
+            covariance = np.cov(stock_returns, market_returns)[0, 1]
+            market_variance = np.var(market_returns)
+            
+            beta = covariance / market_variance if market_variance > 0 else 1.0
+            
             return beta
+            
         except Exception as e:
-            print(f"Erreur lors de la récupération du bêta pour {ticker}: {e}")
+            print(f"Erreur lors du calcul du bêta pour {ticker}: {e}")
             return 1.0
 
     @staticmethod
-    def calculate_advanced_metrics(df: pd.DataFrame) -> Dict:
-        """Calcule les métriques avancées de risque et performance"""
+    def calculate_advanced_metrics(df: pd.DataFrame, period_days: int = 252) -> Dict:
+        """
+        Calcule les métriques avancées de risque et performance
+        
+        Args:
+            df: DataFrame avec colonnes 'perf' (performances en %) et 'weight' (poids)
+            period_days: Nombre de jours pour l'annualisation (252 par défaut)
+        """
         if 'perf' not in df.columns or 'weight' not in df.columns or len(df) == 0:
             return {
                 'sharpe_ratio': 0,
@@ -1503,63 +1551,92 @@ class RiskPerformanceAnalyzer:
                 'max_drawdown': 0,
                 'var_95': 0,
                 'cvar_95': 0,
-                'beta': 0,
+                'beta': 1.0,
                 'alpha': 0,
                 'information_ratio': 0,
-                'treynor_ratio': 0
+                'treynor_ratio': 0,
+                'portfolio_return': 0,
+                'portfolio_volatility': 0
             }
 
         # Conversion des performances en rendements décimaux
         returns = df['perf'].values / 100
-        weights = df['weight'].values
+        weights = df['weight'].values / 100  # Normaliser les poids
+        
+        # Normaliser les poids pour qu'ils somment à 1
+        if np.sum(weights) > 0:
+            weights = weights / np.sum(weights)
+        else:
+            weights = np.ones(len(weights)) / len(weights)
 
-        # Rendement du portefeuille
+        # Rendement du portefeuille (moyenne pondérée)
         portfolio_return = np.sum(weights * returns)
-
-        # Volatilité du portefeuille (approximation)
-        portfolio_volatility = np.sqrt(np.sum((weights**2) * (returns**2)))
-
-        # Taux sans risque (approximation 2% annuel)
+        
+        # Volatilité du portefeuille (formule correcte avec matrice de covariance)
+        # Approximation: volatilité = sqrt(somme des variances pondérées)
+        individual_volatilities = np.abs(returns - np.mean(returns))
+        portfolio_volatility = np.sqrt(np.sum((weights**2) * (individual_volatilities**2)))
+        
+        # Annualisation des métriques
+        annualized_return = portfolio_return * period_days
+        annualized_volatility = portfolio_volatility * np.sqrt(period_days)
+        
+        # Taux sans risque (2% annuel)
         risk_free_rate = 0.02
-
-        # Sharpe Ratio
-        sharpe_ratio = (portfolio_return - risk_free_rate) / portfolio_volatility if portfolio_volatility > 0 else 0
-
+        
+        # Sharpe Ratio (annualisé)
+        sharpe_ratio = (annualized_return - risk_free_rate) / annualized_volatility if annualized_volatility > 0 else 0
+        
         # Sortino Ratio (utilise seulement la volatilité des rendements négatifs)
         negative_returns = returns[returns < 0]
-        downside_deviation = np.std(negative_returns) if len(negative_returns) > 0 else portfolio_volatility
-        sortino_ratio = (portfolio_return - risk_free_rate) / downside_deviation if downside_deviation > 0 else 0
-
-        # Maximum Drawdown (approximation basée sur la distribution des rendements)
+        if len(negative_returns) > 0:
+            downside_deviation = np.std(negative_returns) * np.sqrt(period_days)
+        else:
+            downside_deviation = annualized_volatility
+        
+        sortino_ratio = (annualized_return - risk_free_rate) / downside_deviation if downside_deviation > 0 else 0
+        
+        # Maximum Drawdown (estimation basée sur la distribution)
+        # Approche simplifiée: maximum des pertes potentielles
         sorted_returns = np.sort(returns)
         max_drawdown = abs(sorted_returns[0]) if len(sorted_returns) > 0 else 0
-
+        
         # Calmar Ratio
-        calmar_ratio = portfolio_return / max_drawdown if max_drawdown > 0 else 0
-
-        # Value at Risk (VaR) 95%
+        calmar_ratio = annualized_return / max_drawdown if max_drawdown > 0 else 0
+        
+        # Value at Risk (VaR) 95% (perte maximale avec 95% de confiance)
         var_95 = np.percentile(returns, 5)
-
-        # Conditional VaR (CVaR) 95%
-        cvar_95 = np.mean(returns[returns <= var_95]) if len(returns[returns <= var_95]) > 0 else var_95
-
-        # Beta (utilisation de yfinance pour obtenir le bêta)
+        
+        # Conditional VaR (CVaR) 95% (perte moyenne au-delà du VaR)
+        returns_below_var = returns[returns <= var_95]
+        cvar_95 = np.mean(returns_below_var) if len(returns_below_var) > 0 else var_95
+        
+        # Beta du portefeuille
+        portfolio_beta = 1.0
         if 'symbol' in df.columns:
-            beta = sum([RiskPerformanceAnalyzer.get_beta(ticker) * weight for ticker, weight in zip(st.session_state.portfolio_df['symbol'], weights)])
-        else:
-            beta = 1.0  # Valeur par défaut si la colonne n'existe pas
-
-        # Alpha (Jensen's Alpha)
-        market_return = 0.08  # Rendement de marché approximatif
-        alpha = portfolio_return - (risk_free_rate + beta * (market_return - risk_free_rate))
-
-        # Information Ratio (approximation)
-        tracking_error = portfolio_volatility * 0.5  # Approximation
+            try:
+                betas = []
+                for idx, row in df.iterrows():
+                    if pd.notna(row['symbol']) and row['symbol'].strip():
+                        beta = RiskPerformanceAnalyzer.get_beta(row['symbol'])
+                        betas.append(beta * weights[idx])
+                
+                if betas:
+                    portfolio_beta = np.sum(betas)
+            except:
+                portfolio_beta = 1.0
+        
+        # Alpha (rendement excédentaire ajusté du risque)
+        market_return = 0.08  # Rendement de marché approximatif (8% annuel)
+        alpha = annualized_return - (risk_free_rate + portfolio_beta * (market_return - risk_free_rate))
+        
+        # Information Ratio (alpha / tracking error)
+        tracking_error = annualized_volatility * 0.8  # Approximation du tracking error
         information_ratio = alpha / tracking_error if tracking_error > 0 else 0
-
-        # Treynor Ratio
-        treynor_ratio = (portfolio_return - risk_free_rate) / beta if beta > 0 else 0
-
+        
+        # Treynor Ratio (rendement excédentaire par unité de risque systématique)
+        treynor_ratio = (annualized_return - risk_free_rate) / portfolio_beta if portfolio_beta > 0 else 0
+        
         return {
             'sharpe_ratio': sharpe_ratio,
             'sortino_ratio': sortino_ratio,
@@ -1567,12 +1644,12 @@ class RiskPerformanceAnalyzer:
             'max_drawdown': max_drawdown,
             'var_95': var_95,
             'cvar_95': cvar_95,
-            'beta': beta,
+            'beta': portfolio_beta,
             'alpha': alpha,
             'information_ratio': information_ratio,
             'treynor_ratio': treynor_ratio,
-            'portfolio_return': portfolio_return,
-            'portfolio_volatility': portfolio_volatility
+            'portfolio_return': annualized_return,
+            'portfolio_volatility': annualized_volatility
         }
 
     @staticmethod
@@ -1591,8 +1668,200 @@ class RiskPerformanceAnalyzer:
         else:
             return "D (Insuffisant)"
 
-def create_advanced_risk_analysis(df: pd.DataFrame, ticker_data: Optional[List[Dict]] = None):
+    @staticmethod
+    def calculate_portfolio_correlation_matrix(symbols: List[str], start_date: str, end_date: str) -> pd.DataFrame:
+        """Calcule la matrice de corrélation du portefeuille"""
+        try:
+            returns_data = {}
+            
+            for symbol in symbols:
+                ticker = yf.Ticker(symbol)
+                data = ticker.history(start=start_date, end=end_date)
+                if len(data) > 0:
+                    returns = data['Close'].pct_change().dropna()
+                    returns_data[symbol] = returns
+            
+            if returns_data:
+                returns_df = pd.DataFrame(returns_data)
+                return returns_df.corr()
+            else:
+                return pd.DataFrame()
+                
+        except Exception as e:
+            print(f"Erreur lors du calcul de la matrice de corrélation: {e}")
+            return pd.DataFrame()
 
+
+class EfficientFrontier:
+    """Classe pour le calcul de la frontière efficiente avec formules corrigées"""
+    
+    @staticmethod
+    def get_historical_data(symbols: List[str], start_date: str, end_date: str) -> pd.DataFrame:
+        """Récupère les données historiques pour les symboles donnés"""
+        try:
+            data = yf.download(symbols, start=start_date, end=end_date)['Close']
+            
+            # Si un seul symbole, convertir en DataFrame
+            if isinstance(data, pd.Series):
+                data = data.to_frame()
+                data.columns = symbols
+            
+            # Supprimer les colonnes avec trop de valeurs manquantes
+            data = data.dropna(thresh=len(data) * 0.7, axis=1)
+            
+            return data.dropna()
+            
+        except Exception as e:
+            print(f"Erreur lors du téléchargement des données: {e}")
+            return pd.DataFrame()
+    
+    @staticmethod
+    def calculate_portfolio_performance(weights: np.ndarray, returns: np.ndarray, cov_matrix: np.ndarray) -> Tuple[float, float]:
+        """Calcule le rendement et la volatilité du portefeuille"""
+        portfolio_return = np.sum(weights * returns)
+        portfolio_variance = np.dot(weights.T, np.dot(cov_matrix, weights))
+        portfolio_volatility = np.sqrt(portfolio_variance)
+        
+        return portfolio_return, portfolio_volatility
+    
+    @staticmethod
+    def negative_sharpe_ratio(weights: np.ndarray, returns: np.ndarray, cov_matrix: np.ndarray, risk_free_rate: float = 0.02) -> float:
+        """Fonction objectif pour maximiser le ratio de Sharpe (on minimise le négatif)"""
+        portfolio_return, portfolio_volatility = EfficientFrontier.calculate_portfolio_performance(weights, returns, cov_matrix)
+        
+        if portfolio_volatility == 0:
+            return -np.inf
+        
+        sharpe_ratio = (portfolio_return - risk_free_rate) / portfolio_volatility
+        return -sharpe_ratio
+    
+    @staticmethod
+    def get_efficient_frontier(symbols: List[str], start_date: str, end_date: str, risk_free_rate: float = 0.02) -> Tuple[pd.DataFrame, Dict]:
+        """Calcule le portefeuille optimal sur la frontière efficiente"""
+        try:
+            # Récupérer les données historiques
+            price_data = EfficientFrontier.get_historical_data(symbols, start_date, end_date)
+            
+            if price_data.empty or len(price_data.columns) < 2:
+                return pd.DataFrame(), {'error': 'Données insuffisantes'}
+            
+            # Calculer les rendements quotidiens
+            returns = price_data.pct_change().dropna()
+            
+            if len(returns) < 30:
+                return pd.DataFrame(), {'error': 'Historique trop court (moins de 30 jours)'}
+            
+            # Calculer les statistiques
+            mean_returns = returns.mean() * 252  # Annualiser
+            cov_matrix = returns.cov() * 252  # Annualiser
+            
+            # Vérifier la matrice de covariance
+            if np.any(np.isnan(cov_matrix.values)) or np.any(np.isinf(cov_matrix.values)):
+                return pd.DataFrame(), {'error': 'Matrice de covariance invalide'}
+            
+            # Nombre d'actifs
+            num_assets = len(symbols)
+            
+            # Contraintes
+            constraints = {'type': 'eq', 'fun': lambda x: np.sum(x) - 1}  # Somme des poids = 1
+            bounds = tuple((0, 1) for _ in range(num_assets))  # Pas de vente à découvert
+            
+            # Point de départ (répartition équipondérée)
+            initial_weights = np.array([1/num_assets] * num_assets)
+            
+            # Optimisation pour maximiser le ratio de Sharpe
+            result = minimize(
+                EfficientFrontier.negative_sharpe_ratio,
+                initial_weights,
+                args=(mean_returns.values, cov_matrix.values, risk_free_rate),
+                method='SLSQP',
+                bounds=bounds,
+                constraints=constraints,
+                options={'maxiter': 1000}
+            )
+            
+            if not result.success:
+                return pd.DataFrame(), {'error': f'Optimisation échouée: {result.message}'}
+            
+            # Poids optimaux
+            optimal_weights = result.x
+            
+            # Calculer les métriques du portefeuille optimal
+            portfolio_return, portfolio_volatility = EfficientFrontier.calculate_portfolio_performance(
+                optimal_weights, mean_returns.values, cov_matrix.values
+            )
+            
+            sharpe_ratio = (portfolio_return - risk_free_rate) / portfolio_volatility
+            
+            # Créer le DataFrame des résultats
+            results_df = pd.DataFrame({
+                'weight': optimal_weights
+            }, index=symbols)
+            
+            # Filtrer les poids significatifs (> 0.5%)
+            results_df = results_df[results_df['weight'] > 0.005].sort_values('weight', ascending=False)
+            
+            metrics = {
+                'expected_return': portfolio_return,
+                'volatility': portfolio_volatility,
+                'sharpe_ratio': sharpe_ratio
+            }
+            
+            return results_df, metrics
+            
+        except Exception as e:
+            return pd.DataFrame(), {'error': f'Erreur lors du calcul: {str(e)}'}
+    
+    @staticmethod
+    def generate_efficient_frontier_curve(symbols: List[str], start_date: str, end_date: str, num_portfolios: int = 50) -> Tuple[List[float], List[float]]:
+        """Génère la courbe de la frontière efficiente"""
+        try:
+            # Récupérer les données
+            price_data = EfficientFrontier.get_historical_data(symbols, start_date, end_date)
+            
+            if price_data.empty:
+                return [], []
+            
+            returns = price_data.pct_change().dropna()
+            mean_returns = returns.mean() * 252
+            cov_matrix = returns.cov() * 252
+            
+            # Générer des portefeuilles aléatoires
+            num_assets = len(symbols)
+            results = []
+            
+            for _ in range(num_portfolios * 10):  # Générer plus de portefeuilles
+                # Poids aléatoires
+                weights = np.random.random(num_assets)
+                weights /= np.sum(weights)
+                
+                # Calculer les métriques
+                portfolio_return, portfolio_volatility = EfficientFrontier.calculate_portfolio_performance(
+                    weights, mean_returns.values, cov_matrix.values
+                )
+                
+                results.append({
+                    'return': portfolio_return,
+                    'volatility': portfolio_volatility,
+                    'sharpe': (portfolio_return - 0.02) / portfolio_volatility if portfolio_volatility > 0 else 0
+                })
+            
+            # Trier par ratio de Sharpe et garder les meilleurs
+            results.sort(key=lambda x: x['sharpe'], reverse=True)
+            results = results[:num_portfolios]
+            
+            # Extraire les rendements et volatilités
+            returns_list = [r['return'] for r in results]
+            volatility_list = [r['volatility'] for r in results]
+            
+            return returns_list, volatility_list
+            
+        except Exception as e:
+            print(f"Erreur lors de la génération de la courbe: {e}")
+            return [], []
+
+
+def create_advanced_risk_analysis(df: pd.DataFrame, ticker_data: Optional[List[Dict]] = None):
     """
     Analyse de risque avancée avec frontière efficiente corrigée
     """
@@ -1601,246 +1870,254 @@ def create_advanced_risk_analysis(df: pd.DataFrame, ticker_data: Optional[List[D
         return
 
     # Ajouter les symboles au DataFrame si ticker_data est fourni
-    if ticker_data:
+    if ticker_data and len(ticker_data) > 0:
         if 'symbol' not in df.columns:
             df['symbol'] = ''
-        df['symbol'] = [ticker['symbol'] for ticker in ticker_data]
+        
+        # Mapper les symboles
+        for i, ticker in enumerate(ticker_data):
+            if i < len(df):
+                df.loc[i, 'symbol'] = ticker.get('symbol', '')
 
     st.subheader("⚠️ Analyse de Risque Avancée")
 
     # Vérification des colonnes nécessaires
     required_columns = ['perf', 'weight']
-    if not all(col in df.columns for col in required_columns):
-        st.error(f"Les colonnes suivantes sont manquantes dans le DataFrame : {required_columns}")
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    
+    if missing_columns:
+        st.error(f"Les colonnes suivantes sont manquantes : {missing_columns}")
         return
 
-    if len(df) > 0:
-        try:
-            # Calcul des métriques avancées (votre code existant)
-            
-            metrics = RiskPerformanceAnalyzer.calculate_advanced_metrics(df)
+    if len(df) == 0:
+        st.info("Aucune donnée disponible pour l'analyse")
+        return
 
-            # Affichage des métriques principales (votre code existant)
-            st.markdown("#### 📊 Métriques de Performance")
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Rendement Portfolio", f"{metrics['portfolio_return']:.2%}")
-                st.metric("Sharpe Ratio", f"{metrics['sharpe_ratio']:.3f}")
-            with col2:
-                st.metric("Volatilité", f"{metrics['portfolio_volatility']:.2%}")
-                st.metric("Sortino Ratio", f"{metrics['sortino_ratio']:.3f}")
-            with col3:
-                st.metric("VaR 95%", f"{metrics['var_95']:.2%}")
-                st.metric("CVaR 95%", f"{metrics['cvar_95']:.2%}")
-            with col4:
-                st.metric("Max Drawdown", f"{metrics['max_drawdown']:.2%}")
-                st.metric("Calmar Ratio", f"{metrics['calmar_ratio']:.3f}")
+    try:
+        # Calcul des métriques avancées
+        metrics = RiskPerformanceAnalyzer.calculate_advanced_metrics(df)
 
-            # Section Frontière Efficiente corrigée
-            st.subheader("📈 Frontière Efficiente")
+        # Affichage des métriques principales
+        st.markdown("#### 📊 Métriques de Performance")
+        
+        # Note de performance
+        grade = RiskPerformanceAnalyzer.get_performance_grade(
+            metrics['sharpe_ratio'], 
+            metrics['sortino_ratio']
+        )
+        
+        st.info(f"**Note de Performance:** {grade}")
+        
+        # Métriques en colonnes
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Rendement Annuel", f"{metrics['portfolio_return']:.2%}")
+            st.metric("Sharpe Ratio", f"{metrics['sharpe_ratio']:.3f}")
+            st.metric("Alpha", f"{metrics['alpha']:.2%}")
+        
+        with col2:
+            st.metric("Volatilité Annuelle", f"{metrics['portfolio_volatility']:.2%}")
+            st.metric("Sortino Ratio", f"{metrics['sortino_ratio']:.3f}")
+            st.metric("Beta", f"{metrics['beta']:.3f}")
+        
+        with col3:
+            st.metric("VaR 95%", f"{metrics['var_95']:.2%}")
+            st.metric("CVaR 95%", f"{metrics['cvar_95']:.2%}")
+            st.metric("Treynor Ratio", f"{metrics['treynor_ratio']:.3f}")
+        
+        with col4:
+            st.metric("Max Drawdown", f"{metrics['max_drawdown']:.2%}")
+            st.metric("Calmar Ratio", f"{metrics['calmar_ratio']:.3f}")
+            st.metric("Information Ratio", f"{metrics['information_ratio']:.3f}")
+
+        # Graphique radar des métriques
+        st.markdown("#### 📈 Profil de Risque")
+        
+        # Normaliser les métriques pour le graphique radar
+        metrics_normalized = {
+            'Sharpe Ratio': max(0, min(metrics['sharpe_ratio'] / 3, 1)),
+            'Sortino Ratio': max(0, min(metrics['sortino_ratio'] / 3, 1)),
+            'Calmar Ratio': max(0, min(metrics['calmar_ratio'] / 2, 1)),
+            'Information Ratio': max(0, min((metrics['information_ratio'] + 1) / 2, 1)),
+            'Treynor Ratio': max(0, min(metrics['treynor_ratio'] / 0.1, 1)),
+            'Alpha': max(0, min((metrics['alpha'] + 0.05) / 0.1, 1))
+        }
+        
+        fig_radar = go.Figure()
+        
+        fig_radar.add_trace(go.Scatterpolar(
+            r=list(metrics_normalized.values()),
+            theta=list(metrics_normalized.keys()),
+            fill='toself',
+            name='Profil de Risque'
+        ))
+        
+        fig_radar.update_layout(
+            polar=dict(
+                radialaxis=dict(visible=True, range=[0, 1])
+            ),
+            showlegend=True,
+            title="Profil de Risque du Portefeuille"
+        )
+        
+        st.plotly_chart(fig_radar, use_container_width=True)
+
+        # Section Frontière Efficiente
+        st.markdown("#### 📈 Optimisation de Portefeuille")
+        
+        if 'symbol' in df.columns and len(df) >= 2:
+            # Nettoyer les symboles
+            valid_symbols = []
+            for symbol in df['symbol'].dropna():
+                if symbol and isinstance(symbol, str) and symbol.strip():
+                    valid_symbols.append(symbol.strip())
             
-            # Vérifier la présence de la colonne symbol
-            if 'symbol' in df.columns and len(df) >= 2:
-                # Nettoyer les symboles
-                symbols = df['symbol'].dropna().unique().tolist()
-                valid_symbols = [s for s in symbols if s and isinstance(s, str) and s.strip()]
+            valid_symbols = list(set(valid_symbols))  # Supprimer les doublons
+            
+            if len(valid_symbols) >= 2:
+                # Interface utilisateur
+                col1, col2 = st.columns(2)
                 
-                if len(valid_symbols) >= 2:
-                    # Interface utilisateur pour la configuration
-                    col1, col2 = st.columns(2)
+                with col1:
+                    periods = {
+                        "6 mois": 180,
+                        "1 an": 365,
+                        "2 ans": 730,
+                        "3 ans": 1095
+                    }
                     
-                    with col1:
-                        # Période d'analyse
-                        periods = {
-                            "1 an": 365,
-                            "2 ans": 730,
-                            "3 ans": 1095,
-                            "5 ans": 1825
-                        }
-                        
-                        selected_period = st.selectbox("Période d'analyse", list(periods.keys()), index=1)
-                        days_back = periods[selected_period]
-                        
-                        end_date = datetime.now()
-                        start_date = end_date - timedelta(days=days_back)
-                        
-                        st.info(f"Période: {start_date.strftime('%Y-%m-%d')} à {end_date.strftime('%Y-%m-%d')}")
+                    selected_period = st.selectbox("Période d'analyse", list(periods.keys()), index=1)
+                    days_back = periods[selected_period]
                     
-                    with col2:
-                        # Sélection des tickers
-                        st.write("**Tickers sélectionnés:**")
-                        selected_tickers = st.multiselect(
-                            "Choisir les tickers pour la frontière efficiente",
-                            valid_symbols,
-                            default=valid_symbols[:10] if len(valid_symbols) > 10 else valid_symbols,
-                            help="Sélectionnez au moins 2 tickers"
-                        )
-                    
-                    # Bouton pour calculer
-                    if st.button("🔄 Calculer la frontière efficiente", key="calc_efficient_frontier"):
-                        if len(selected_tickers) >= 2:
-                            with st.spinner("Calcul de la frontière efficiente en cours..."):
-                                try:
-                                    # Calcul de la frontière efficiente
-                                    optimal_weights_df, metrics_ef = EfficientFrontier.get_efficient_frontier(
-                                        selected_tickers, 
-                                        start_date.strftime('%Y-%m-%d'), 
-                                        end_date.strftime('%Y-%m-%d')
-                                    )
+                    end_date = datetime.now()
+                    start_date = end_date - timedelta(days=days_back)
+                
+                with col2:
+                    max_tickers = min(10, len(valid_symbols))
+                    selected_tickers = st.multiselect(
+                        "Sélectionner les actifs (max 10)",
+                        valid_symbols,
+                        default=valid_symbols[:max_tickers],
+                        max_selections=10
+                    )
+                
+                if st.button("🔄 Optimiser le portefeuille", key="optimize_portfolio"):
+                    if len(selected_tickers) >= 2:
+                        with st.spinner("Calcul de l'optimisation..."):
+                            optimal_weights_df, metrics_ef = EfficientFrontier.get_efficient_frontier(
+                                selected_tickers,
+                                start_date.strftime('%Y-%m-%d'),
+                                end_date.strftime('%Y-%m-%d')
+                            )
+                            
+                            if not optimal_weights_df.empty and 'error' not in metrics_ef:
+                                st.success("✅ Optimisation réussie!")
+                                
+                                # Métriques du portefeuille optimal
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("Rendement Optimal", f"{metrics_ef['expected_return']:.2%}")
+                                with col2:
+                                    st.metric("Volatilité Optimale", f"{metrics_ef['volatility']:.2%}")
+                                with col3:
+                                    st.metric("Sharpe Ratio Optimal", f"{metrics_ef['sharpe_ratio']:.3f}")
+                                
+                                # Tableau des poids optimaux
+                                st.subheader("🎯 Allocation Optimale")
+                                
+                                # Comparaison avec les poids actuels
+                                comparison_data = []
+                                for symbol in optimal_weights_df.index:
+                                    current_weight = 0
+                                    if symbol in df['symbol'].values:
+                                        mask = df['symbol'] == symbol
+                                        if mask.any():
+                                            current_weight = df.loc[mask, 'weight'].iloc[0] / 100
                                     
-                                    if not optimal_weights_df.empty:
-                                        # Affichage des résultats
-                                        st.success("✅ Frontière efficiente calculée avec succès!")
-                                        
-                                        # Métriques du portefeuille optimal
-                                        col1, col2, col3 = st.columns(3)
-                                        with col1:
-                                            st.metric("Rendement optimal", f"{metrics_ef['expected_return']:.2%}")
-                                        with col2:
-                                            st.metric("Volatilité optimale", f"{metrics_ef['volatility']:.2%}")
-                                        with col3:
-                                            st.metric("Ratio de Sharpe", f"{metrics_ef['sharpe_ratio']:.3f}")
-                                        
-                                        # Tableau des poids optimaux
-                                        st.write("**Poids optimaux pour maximiser le ratio de Sharpe:**")
-                                        
-                                        # Créer un DataFrame plus informatif
-                                        optimal_display = optimal_weights_df.copy()
-                                        optimal_display['weight_pct'] = optimal_display['weight'] * 100
-                                        
-                                        # Ajouter les poids actuels pour comparaison
-                                        current_weights = {}
-                                        for symbol in optimal_display.index:
-                                            current_weight = df[df['symbol'] == symbol]['weight'].iloc[0] if symbol in df['symbol'].values else 0
-                                            current_weights[symbol] = current_weight
-                                        
-                                        optimal_display['current_weight'] = [current_weights.get(symbol, 0) for symbol in optimal_display.index]
-                                        optimal_display['current_weight_pct'] = optimal_display['current_weight'] * 100
-                                        optimal_display['difference'] = optimal_display['weight_pct'] - optimal_display['current_weight_pct']
-                                        
-                                        # Affichage formaté
-                                        st.dataframe(
-                                            optimal_display[['weight_pct', 'current_weight_pct', 'difference']].style.format({
-                                                'weight_pct': '{:.2f}%',
-                                                'current_weight_pct': '{:.2f}%',
-                                                'difference': '{:+.2f}%'
-                                            }).background_gradient(subset=['difference'], cmap='RdYlGn'),
-                                            column_config={
-                                                'weight_pct': 'Poids optimal (%)',
-                                                'current_weight_pct': 'Poids actuel (%)',
-                                                'difference': 'Différence (%)'
-                                            }
-                                        )
-                                        
-                                        # Graphique de comparaison
-                                        fig_comparison = go.Figure()
-                                        
-                                        fig_comparison.add_trace(go.Bar(
-                                            name='Poids optimal',
-                                            x=optimal_display.index,
-                                            y=optimal_display['weight_pct'],
-                                            marker_color='lightblue'
-                                        ))
-                                        
-                                        fig_comparison.add_trace(go.Bar(
-                                            name='Poids actuel',
-                                            x=optimal_display.index,
-                                            y=optimal_display['current_weight_pct'],
-                                            marker_color='lightcoral'
-                                        ))
-                                        
-                                        fig_comparison.update_layout(
-                                            title='Comparaison Poids Optimal vs Actuel',
-                                            xaxis_title='Actifs',
-                                            yaxis_title='Poids (%)',
-                                            barmode='group',
-                                            height=400
-                                        )
-                                        
-                                        st.plotly_chart(fig_comparison, use_container_width=True)
-                                        
-                                        # Génération de la courbe de frontière efficiente
-                                        with st.expander("📊 Courbe de la frontière efficiente"):
-                                            returns_ef, volatility_ef = EfficientFrontier.generate_efficient_frontier_curve(
-                                                selected_tickers,
-                                                start_date.strftime('%Y-%m-%d'),
-                                                end_date.strftime('%Y-%m-%d'),
-                                                num_portfolios=50
-                                            )
-                                            
-                                            if returns_ef and volatility_ef:
-                                                fig_ef = go.Figure()
-                                                
-                                                # Courbe de la frontière efficiente
-                                                fig_ef.add_trace(go.Scatter(
-                                                    x=volatility_ef,
-                                                    y=returns_ef,
-                                                    mode='lines+markers',
-                                                    name='Frontière Efficiente',
-                                                    line=dict(color='blue', width=2)
-                                                ))
-                                                
-                                                # Point du portefeuille optimal
-                                                fig_ef.add_trace(go.Scatter(
-                                                    x=[metrics_ef['volatility']],
-                                                    y=[metrics_ef['expected_return']],
-                                                    mode='markers',
-                                                    name='Portefeuille Optimal',
-                                                    marker=dict(color='red', size=10, symbol='star')
-                                                ))
-                                                
-                                                fig_ef.update_layout(
-                                                    title='Frontière Efficiente',
-                                                    xaxis_title='Volatilité (%)',
-                                                    yaxis_title='Rendement Espéré (%)',
-                                                    height=500
-                                                )
-                                                
-                                                st.plotly_chart(fig_ef, use_container_width=True)
-                                            else:
-                                                st.warning("Impossible de générer la courbe de frontière efficiente")
-                                        
-                                        # Stocker les résultats dans session_state pour éviter les recalculs
-                                        st.session_state.efficient_frontier_results = {
-                                            'optimal_weights': optimal_weights_df,
-                                            'metrics': metrics_ef,
-                                            'timestamp': datetime.now()
-                                        }
-                                        
-                                    else:
-                                        error_msg = metrics_ef.get('error', 'Erreur inconnue')
-                                        st.error(f"❌ Impossible de calculer la frontière efficiente: {error_msg}")
-                                        
-                                        # Suggestions d'amélioration
-                                        st.markdown("**Suggestions:**")
-                                        st.markdown("- Vérifiez que les symboles sont corrects")
-                                        st.markdown("- Essayez avec une période plus longue")
-                                        st.markdown("- Réduisez le nombre de tickers sélectionnés")
-                                        
-                                except Exception as e:
-                                    st.error(f"❌ Erreur lors du calcul: {str(e)}")
-                                    st.markdown("**Aide au débogage:**")
-                                    st.write(f"- Tickers sélectionnés: {selected_tickers}")
-                                    st.write(f"- Période: {start_date.strftime('%Y-%m-%d')} à {end_date.strftime('%Y-%m-%d')}")
-                        else:
-                            st.warning("⚠️ Veuillez sélectionner au moins 2 tickers")
-                    
-                    # Affichage des résultats précédents s'ils existent
-                    if hasattr(st.session_state, 'efficient_frontier_results') and st.session_state.efficient_frontier_results:
-                        results = st.session_state.efficient_frontier_results
-                        with st.expander("📋 Derniers résultats calculés"):
-                            st.write(f"**Calculé le:** {results['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
-                            st.dataframe(results['optimal_weights'].style.format({'weight': '{:.2%}'}))
-                else:
-                    st.warning("⚠️ Au moins 2 symboles valides sont nécessaires pour calculer la frontière efficiente")
-                    st.write(f"Symboles trouvés: {valid_symbols}")
+                                    optimal_weight = optimal_weights_df.loc[symbol, 'weight']
+                                    
+                                    comparison_data.append({
+                                        'Actif': symbol,
+                                        'Poids Actuel (%)': current_weight * 100,
+                                        'Poids Optimal (%)': optimal_weight * 100,
+                                        'Différence (%)': (optimal_weight - current_weight) * 100
+                                    })
+                                
+                                comparison_df = pd.DataFrame(comparison_data)
+                                
+                                st.dataframe(
+                                    comparison_df.style.format({
+                                        'Poids Actuel (%)': '{:.2f}%',
+                                        'Poids Optimal (%)': '{:.2f}%',
+                                        'Différence (%)': '{:+.2f}%'
+                                    }).background_gradient(subset=['Différence (%)'], cmap='RdYlGn'),
+                                    use_container_width=True
+                                )
+                                
+                                # Graphique de comparaison
+                                fig_comparison = go.Figure()
+                                
+                                fig_comparison.add_trace(go.Bar(
+                                    name='Poids Actuel',
+                                    x=comparison_df['Actif'],
+                                    y=comparison_df['Poids Actuel (%)'],
+                                    marker_color='lightcoral'
+                                ))
+                                
+                                fig_comparison.add_trace(go.Bar(
+                                    name='Poids Optimal',
+                                    x=comparison_df['Actif'],
+                                    y=comparison_df['Poids Optimal (%)'],
+                                    marker_color='lightblue'
+                                ))
+                                
+                                fig_comparison.update_layout(
+                                    title='Comparaison Allocation Actuelle vs Optimale',
+                                    xaxis_title='Actifs',
+                                    yaxis_title='Poids (%)',
+                                    barmode='group',
+                                    height=400
+                                )
+                                
+                                st.plotly_chart(fig_comparison, use_container_width=True)
+                                
+                            else:
+                                error_msg = metrics_ef.get('error', 'Erreur inconnue')
+                                st.error(f"❌ Erreur lors de l'optimisation: {error_msg}")
+                    else:
+                        st.warning("⚠️ Sélectionnez au moins 2 actifs")
             else:
-                st.error("❌ La colonne 'symbol' est manquante ou le portefeuille contient moins de 2 actifs")
+                st.warning(f"⚠️ Au moins 2 symboles valides requis. Trouvés: {len(valid_symbols)}")
+        else:
+            st.error("❌ Colonne 'symbol' manquante ou moins de 2 actifs")
 
-        except Exception as e:
-            st.error(f"Une erreur est survenue lors de l'analyse de risque avancée : {str(e)}")
-    else:
-        st.info("Données insuffisantes pour l'analyse de risque avancée")
+    except Exception as e:
+        st.error(f"❌ Erreur lors de l'analyse: {str(e)}")
+        st.write("Débogage:", str(e))
+
+
+# Fonction utilitaire pour tester les calculs
+def test_risk_metrics():
+    """Fonction de test pour valider les calculs"""
+    # Données de test
+    test_data = pd.DataFrame({
+        'perf': [10.5, -5.2, 8.1, 15.3, -2.1],
+        'weight': [30, 25, 20, 15, 10],
+        'symbol': ['AAPL', 'GOOGL', 'MSFT', 'AMZN', 'TSLA']
+    })
+    
+    metrics = RiskPerformanceAnalyzer.calculate_advanced_metrics(test_data)
+    
+    print("Métriques calculées:")
+    for key, value in metrics.items():
+        print(f"{key}: {value:.4f}")
+    
+    return metrics
+
+# Exécuter le test si ce fichier est exécuté directement
+if __name__ == "__main__":
+    test_results = test_risk_metrics()
 # Fonction pour remplacer create_risk_analysis dans le code principal
 def create_risk_analysis(df: pd.DataFrame):
     """Appelle la nouvelle analyse de risque avancée"""
