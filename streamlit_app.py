@@ -2461,7 +2461,7 @@ def main():
         st.subheader("📋 Détail du portefeuille")
         
         # Colonnes à afficher
-        display_columns = ['name', 'symbol', 'quantity', 'buyingPrice', 'lastPrice', 
+        display_columns = ['name', 'symbol', 'quantity', "date d'achat", 'buyingPrice', 'lastPrice', 
                           'amount', 'weight_pct', 'perf', 'sector']
         available_display_columns = [col for col in display_columns if col in df.columns]
         
@@ -2474,6 +2474,7 @@ def main():
                 'name': 'Nom',
                 'symbol': 'Symbole',
                 'quantity': 'Quantité',
+                "date d'achat": 'Date'
                 'buyingPrice': 'Prix d\'achat',
                 'lastPrice': 'Prix actuel',
                 'amount': 'Montant (€)',
