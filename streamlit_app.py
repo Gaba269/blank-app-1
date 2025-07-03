@@ -965,7 +965,7 @@ class PortfolioManager:
     
     
     def add_stock_to_portfolio(self, ticker_data: Dict, quantity: int, buying_price: float = None, purchase_date=None):
-    """Ajoute une action au portefeuille avec prix d'achat personnalisable"""
+        """Ajoute une action au portefeuille avec prix d'achat personnalisable"""
         # Utilise le prix d'achat fourni ou le prix actuel par défaut
         purchase_price = buying_price if buying_price is not None else ticker_data['price']
     
