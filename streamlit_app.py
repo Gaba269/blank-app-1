@@ -972,7 +972,7 @@ class PortfolioManager:
             'name': ticker_data['name'],
             'symbol': ticker_data['symbol'],
             'isin': ticker_data.get('isin', 'Unknown'),
-            'date d'achat': purchase_date,
+            "date d'achat": purchase_date,
             'quantity': quantity,
             'buyingPrice': purchase_price,  # Prix d'achat personnalisé ou actuel
             'lastPrice': ticker_data['price'],  # Prix actuel du marché
