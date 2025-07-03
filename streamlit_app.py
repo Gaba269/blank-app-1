@@ -963,7 +963,7 @@ class PortfolioManager:
         if 'original_df' not in st.session_state:
             st.session_state.original_df = pd.DataFrame()
     
-    def add_stock_to_portfolio(self, ticker_data: Dict, quantity: int, buying_price: float = None):
+    def add_stock_to_portfolio(self, ticker_data: Dict, quantity: int, buying_price: float = None, purchase_date):
         """Ajoute une action au portefeuille avec prix d'achat personnalisable"""
         # Utilise le prix d'achat fourni ou le prix actuel par défaut
         purchase_price = buying_price if buying_price is not None else ticker_data['price']
@@ -972,6 +972,7 @@ class PortfolioManager:
             'name': ticker_data['name'],
             'symbol': ticker_data['symbol'],
             'isin': ticker_data.get('isin', 'Unknown'),
+            'date d'achat': purchase_date,
             'quantity': quantity,
             'buyingPrice': purchase_price,  # Prix d'achat personnalisé ou actuel
             'lastPrice': ticker_data['price'],  # Prix actuel du marché
@@ -2326,7 +2327,7 @@ def main():
                             st.markdown(f"**Plus/Moins-value:** <span style='color: {pnl_color}'>{pnl:+.2f} {ticker_data['currency']}</span>", unsafe_allow_html=True)
                     
                     if st.button("Ajouter au portefeuille"):
-                        success = portfolio_manager.add_stock_to_portfolio(ticker_data, quantity, buying_price)
+                        success = portfolio_manager.add_stock_to_portfolio(ticker_data, quantity, buying_price,purchase_date)
                         if success:
                             st.success("✅ Action ajoutée au portefeuille!")
                             st.rerun()
