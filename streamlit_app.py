@@ -963,77 +963,71 @@ class PortfolioManager:
         if 'original_df' not in st.session_state:
             st.session_state.original_df = pd.DataFrame()
     
-    def add_stock_to_portfolio(self, ticker_data: Dict, quantity: int, buying_price: float = None, purchase_date: str = None):
-        """Ajoute une action au portefeuille avec prix d'achat personnalisable et date d'achat"""
-
+    def add_stock_to_portfolio(self, ticker_data: Dict, quantity: int, buying_price: float = None):
+        """Ajoute une action au portefeuille avec prix d'achat personnalisable"""
         # Utilise le prix d'achat fourni ou le prix actuel par défaut
         purchase_price = buying_price if buying_price is not None else ticker_data['price']
-
-    # Utilise la date d'achat fournie ou la date actuelle par défaut
-        purchase_date = purchase_date if purchase_date is not None else datetime.now().strftime("%Y-%m-%d")
-
+        
         new_row = {
-        'name': ticker_data['name'],
-        'symbol': ticker_data['symbol'],
-        'isin': ticker_data.get('isin', 'Unknown'),
-        'quantity': quantity,
-        'buyingPrice': purchase_price,  # Prix d'achat personnalisé ou actuel
-        'lastPrice': ticker_data['price'],  # Prix actuel du marché
-        'currency': ticker_data.get('currency', 'USD'),
-        'exchange': ticker_data.get('exchange', 'Unknown'),
-        'sector': ticker_data.get('sector', 'Unknown'),
-        'industry': ticker_data.get('industry', 'Unknown'),
-        'asset_type': ticker_data.get('type', 'Stock'),
-        'intradayVariation': 0.0,
-        'amount': quantity * ticker_data['price'],  # Valeur actuelle
-        'amountVariation': quantity * (ticker_data['price'] - purchase_price),  # Plus/moins-value
-        'variation': ((ticker_data['price'] - purchase_price) / purchase_price * 100) if purchase_price > 0 else 0.0,
-        'purchase_date': purchase_date,  # Ajout de la date d'achat
-        'Tickers': ticker_data['symbol']  # Pour compatibilité
-    }
-
-    # Ajout au DataFrame
+            'name': ticker_data['name'],
+            'symbol': ticker_data['symbol'],
+            'isin': ticker_data.get('isin', 'Unknown'),
+            'quantity': quantity,
+            'buyingPrice': purchase_price,  # Prix d'achat personnalisé ou actuel
+            'lastPrice': ticker_data['price'],  # Prix actuel du marché
+            'currency': ticker_data.get('currency', 'USD'),
+            'exchange': ticker_data.get('exchange', 'Unknown'),
+            'sector': ticker_data.get('sector', 'Unknown'),
+            'industry': ticker_data.get('industry', 'Unknown'),
+            'asset_type': ticker_data.get('type', 'Stock'),
+            'intradayVariation': 0.0,
+            'amount': quantity * ticker_data['price'],  # Valeur actuelle
+            'amountVariation': quantity * (ticker_data['price'] - purchase_price),  # Plus/moins-value
+            'variation': ((ticker_data['price'] - purchase_price) / purchase_price * 100) if purchase_price > 0 else 0.0,
+            'Tickers': ticker_data['symbol']  # Pour compatibilité
+        }
+        
+        # Ajout au DataFrame
         if st.session_state.portfolio_df.empty:
             st.session_state.portfolio_df = pd.DataFrame([new_row])
         else:
             st.session_state.portfolio_df = pd.concat([
-                st.session_state.portfolio_df,
+                st.session_state.portfolio_df, 
                 pd.DataFrame([new_row])
             ], ignore_index=True)
-
+        
         return True
     
     def update_portfolio_metrics(self):
         """Met à jour toutes les métriques du portefeuille"""
         if st.session_state.portfolio_df.empty:
             return {'total_value': 0, 'portfolio_performance': 0}
-
+        
         df = st.session_state.portfolio_df
-
+        
         # Calculs de base
         total_value = df['amount'].sum()
-
-    # Éviter la division par zéro
+        
+        # Éviter la division par zéro
         if total_value > 0:
             df['weight'] = df['amount'] / total_value
             df['weight_pct'] = df['weight'] * 100
         else:
             df['weight'] = 0
             df['weight_pct'] = 0
-
-    # Calcul des performances
+        
+        # Calcul des performances
         df['perf'] = ((df['lastPrice'] - df['buyingPrice']) / df['buyingPrice'] * 100).fillna(0)
-
-    # Performance pondérée
+        
+        # Performance pondérée
         portfolio_perf = (df['weight'] * df['perf']).sum()
-
+        
         st.session_state.portfolio_df = df
-
+        
         return {
             'total_value': total_value,
             'portfolio_performance': portfolio_perf
         }
-
 
 def generate_recommendations(df: pd.DataFrame, concentration: Dict, 
                            sector_analysis: pd.DataFrame, geo_analysis: pd.DataFrame):
@@ -1544,6 +1538,10 @@ class RiskPerformanceAnalyzer:
     def calculate_advanced_metrics(df: pd.DataFrame, period_days: int = 252) -> Dict:
         """
         Calcule les métriques avancées de risque et performance
+        
+        Args:
+            df: DataFrame avec colonnes 'perf' (performances en %) et 'weight' (poids)
+            period_days: Nombre de jours pour l'annualisation (252 par défaut)
         """
         if 'perf' not in df.columns or 'weight' not in df.columns or len(df) == 0:
             return {
@@ -1561,73 +1559,59 @@ class RiskPerformanceAnalyzer:
                 'portfolio_volatility': 0
             }
 
-    # Conversion des performances en rendements décimaux
+        # Conversion des performances en rendements décimaux
         returns = df['perf'].values / 100
         weights = df['weight'].values / 100  # Normaliser les poids
-
-    # Debugging: Print intermediate values
-        print("Returns:", returns)
-        print("Weights before normalization:", weights)
-
-    # Normaliser les poids pour qu'ils somment à 1
+        
+        # Normaliser les poids pour qu'ils somment à 1
         if np.sum(weights) > 0:
             weights = weights / np.sum(weights)
         else:
             weights = np.ones(len(weights)) / len(weights)
 
-        print("Weights after normalization:", weights)
-
-    # Rendement du portefeuille (moyenne pondérée)
+        # Rendement du portefeuille (moyenne pondérée)
         portfolio_return = np.sum(weights * returns)
-        print("Portfolio Return (daily):", portfolio_return)
-
-    # Volatilité du portefeuille
+        
+        # Volatilité du portefeuille (formule correcte avec matrice de covariance)
+        # Approximation: volatilité = sqrt(somme des variances pondérées)
         individual_volatilities = np.abs(returns - np.mean(returns))
         portfolio_volatility = np.sqrt(np.sum((weights**2) * (individual_volatilities**2)))
-        print("Portfolio Volatility (daily):", portfolio_volatility)
-
-    # Annualisation des métriques
+        
+        # Annualisation des métriques
         annualized_return = portfolio_return * period_days
         annualized_volatility = portfolio_volatility * np.sqrt(period_days)
-        print("Annualized Return:", annualized_return)
-        print("Annualized Volatility:", annualized_volatility)
-
-    # Taux sans risque (2% annuel)
+        
+        # Taux sans risque (2% annuel)
         risk_free_rate = 0.02
-
-    # Sharpe Ratio (annualisé)
+        
+        # Sharpe Ratio (annualisé)
         sharpe_ratio = (annualized_return - risk_free_rate) / annualized_volatility if annualized_volatility > 0 else 0
-        print("Sharpe Ratio:", sharpe_ratio)
-
-    # Sortino Ratio (utilise seulement la volatilité des rendements négatifs)
+        
+        # Sortino Ratio (utilise seulement la volatilité des rendements négatifs)
         negative_returns = returns[returns < 0]
         if len(negative_returns) > 0:
             downside_deviation = np.std(negative_returns) * np.sqrt(period_days)
         else:
             downside_deviation = annualized_volatility
-
+        
         sortino_ratio = (annualized_return - risk_free_rate) / downside_deviation if downside_deviation > 0 else 0
-        print("Sortino Ratio:", sortino_ratio)
-
-    # Maximum Drawdown (estimation basée sur la distribution)
+        
+        # Maximum Drawdown (estimation basée sur la distribution)
+        # Approche simplifiée: maximum des pertes potentielles
         sorted_returns = np.sort(returns)
         max_drawdown = abs(sorted_returns[0]) if len(sorted_returns) > 0 else 0
-        print("Max Drawdown:", max_drawdown)
-
-    # Calmar Ratio
+        
+        # Calmar Ratio
         calmar_ratio = annualized_return / max_drawdown if max_drawdown > 0 else 0
-        print("Calmar Ratio:", calmar_ratio)
-
-    # Value at Risk (VaR) 95% (perte maximale avec 95% de confiance)
+        
+        # Value at Risk (VaR) 95% (perte maximale avec 95% de confiance)
         var_95 = np.percentile(returns, 5)
-        print("VaR 95%:", var_95)
-
-    # Conditional VaR (CVaR) 95% (perte moyenne au-delà du VaR)
+        
+        # Conditional VaR (CVaR) 95% (perte moyenne au-delà du VaR)
         returns_below_var = returns[returns <= var_95]
         cvar_95 = np.mean(returns_below_var) if len(returns_below_var) > 0 else var_95
-        print("CVaR 95%:", cvar_95)
-
-    # Beta du portefeuille
+        
+        # Beta du portefeuille
         portfolio_beta = 1.0
         if 'symbol' in df.columns:
             try:
@@ -1636,29 +1620,23 @@ class RiskPerformanceAnalyzer:
                     if pd.notna(row['symbol']) and row['symbol'].strip():
                         beta = RiskPerformanceAnalyzer.get_beta(row['symbol'])
                         betas.append(beta * weights[idx])
-
+                
                 if betas:
                     portfolio_beta = np.sum(betas)
-            except Exception as e:
-                print(f"Error calculating beta: {e}")
+            except:
                 portfolio_beta = 1.0
-
-        print("Portfolio Beta:", portfolio_beta)
-
-    # Alpha (rendement excédentaire ajusté du risque)
+        
+        # Alpha (rendement excédentaire ajusté du risque)
         market_return = 0.08  # Rendement de marché approximatif (8% annuel)
         alpha = annualized_return - (risk_free_rate + portfolio_beta * (market_return - risk_free_rate))
-        print("Alpha:", alpha)
-
-    # Information Ratio (alpha / tracking error)
+        
+        # Information Ratio (alpha / tracking error)
         tracking_error = annualized_volatility * 0.8  # Approximation du tracking error
         information_ratio = alpha / tracking_error if tracking_error > 0 else 0
-        print("Information Ratio:", information_ratio)
-
-    # Treynor Ratio (rendement excédentaire par unité de risque systématique)
+        
+        # Treynor Ratio (rendement excédentaire par unité de risque systématique)
         treynor_ratio = (annualized_return - risk_free_rate) / portfolio_beta if portfolio_beta > 0 else 0
-        print("Treynor Ratio:", treynor_ratio)
-
+        
         return {
             'sharpe_ratio': sharpe_ratio,
             'sortino_ratio': sortino_ratio,
@@ -1673,7 +1651,7 @@ class RiskPerformanceAnalyzer:
             'portfolio_return': annualized_return,
             'portfolio_volatility': annualized_volatility
         }
-        
+
     @staticmethod
     def get_performance_grade(sharpe_ratio: float, sortino_ratio: float) -> str:
         """Détermine une note de performance basée sur les ratios"""
@@ -2264,14 +2242,15 @@ def main():
         
         # Ajout manuel d'actions
         st.subheader("➕ Ajouter une action")
-
-    # Recherche de ticker
+    
+        
+        # Recherche de ticker
         search_query = st.text_input("Rechercher un ticker ou nom d'entreprise")
-
+        
         if search_query:
             with st.spinner("Recherche en cours..."):
                 search_results = TickerService.search_tickers(search_query, limit=5)
-
+            
             if search_results:
                 # Sélection du ticker
                 ticker_options = [f"{result['symbol']} - {result['name']}" for result in search_results]
@@ -2280,70 +2259,76 @@ def main():
                     range(len(ticker_options)),
                     format_func=lambda x: ticker_options[x]
                 )
-
+                
                 selected_ticker = search_results[selected_ticker_idx]
-
+                
                 # Validation du ticker
                 with st.spinner("Validation du ticker..."):
                     ticker_data = TickerService.validate_ticker(selected_ticker['symbol'])
-
+                
                 if ticker_data['valid']:
                     # Affichage des informations du ticker
                     st.info(f"**{ticker_data['name']}**\nPrix actuel: {ticker_data['price']:.2f} {ticker_data['currency']}")
-
-                # Saisie de la quantité
+                    
+                    # Saisie de la quantité
                     quantity = st.number_input("Quantité", min_value=1, value=1)
-
-               
+                    
+                    # NOUVELLE SECTION : Choix du prix d'achat
                     st.markdown("**Prix d'achat:**")
                     price_option = st.radio(
                         "Choisir le prix d'achat",
                         ["Prix actuel", "Prix personnalisé"],
                         key="price_option"
                     )
-
+                    
                     buying_price = None
                     if price_option == "Prix actuel":
                         buying_price = ticker_data['price']
                         st.success(f"✅ Prix d'achat: {buying_price:.2f} {ticker_data['currency']} (prix actuel)")
                     else:
-                            buying_price = st.number_input(
+                        buying_price = st.number_input(
                             f"Prix d'achat personnalisé ({ticker_data['currency']})",
                             min_value=0.01,
                             value=ticker_data['price'],
                             step=0.01,
                             format="%.2f"
                         )
-
-                # Ajout de la date du jour
-                    purchase_date = datetime.now().strftime("%Y-%m-%d")
-                    st.write(f"**Date d'achat:** {purchase_date}")
-
-                # Résumé de l'ajout
-                with st.expander("📋 Résumé de l'ajout"):
-                    total_cost = buying_price * quantity
-                    current_value = ticker_data['price'] * quantity
-                    st.write(f"**Quantité:** {quantity}")
-                    st.write(f"**Prix d'achat unitaire:** {buying_price:.2f} {ticker_data['currency']}")
-                    st.write(f"**Prix actuel unitaire:** {ticker_data['price']:.2f} {ticker_data['currency']}")
-                    st.write(f"**Coût total d'achat:** {total_cost:.2f} {ticker_data['currency']}")
-                    st.write(f"**Valeur actuelle:** {current_value:.2f} {ticker_data['currency']}")
-                    st.write(f"**Date d'achat:** {purchase_date}")
-
-                    pnl = current_value - total_cost
-                    if pnl != 0:
-                        pnl_color = "green" if pnl > 0 else "red"
-                        st.markdown(
-                            f"**Plus/Moins-value:** <span style='color: {pnl_color}'>{pnl:+.2f} {ticker_data['currency']}</span>",
-                            unsafe_allow_html=True)
-
-                if st.button("Ajouter au portefeuille"):
-                    success = portfolio_manager.add_stock_to_portfolio(ticker_data, quantity, buying_price, purchase_date)
-                    if success:
-                        st.success("✅ Action ajoutée au portefeuille!")
-                        st.rerun()
-                    else:
-                        st.error("❌ Erreur lors de l'ajout")
+                        
+                        # Calcul et affichage de la plus/moins-value potentielle
+                        if buying_price != ticker_data['price']:
+                            pnl_per_share = ticker_data['price'] - buying_price
+                            pnl_total = pnl_per_share * quantity
+                            pnl_percent = (pnl_per_share / buying_price * 100) if buying_price > 0 else 0
+                            
+                            if pnl_per_share > 0:
+                                st.success(f"📈 Plus-value: +{pnl_total:.2f} {ticker_data['currency']} ({pnl_percent:+.2f}%)")
+                            elif pnl_per_share < 0:
+                                st.error(f"📉 Moins-value: {pnl_total:.2f} {ticker_data['currency']} ({pnl_percent:+.2f}%)")
+                            else:
+                                st.info("➡️ Aucune plus/moins-value")
+                    
+                    # Résumé de l'ajout
+                    with st.expander("📋 Résumé de l'ajout"):
+                        total_cost = buying_price * quantity
+                        current_value = ticker_data['price'] * quantity
+                        st.write(f"**Quantité:** {quantity}")
+                        st.write(f"**Prix d'achat unitaire:** {buying_price:.2f} {ticker_data['currency']}")
+                        st.write(f"**Prix actuel unitaire:** {ticker_data['price']:.2f} {ticker_data['currency']}")
+                        st.write(f"**Coût total d'achat:** {total_cost:.2f} {ticker_data['currency']}")
+                        st.write(f"**Valeur actuelle:** {current_value:.2f} {ticker_data['currency']}")
+                        
+                        pnl = current_value - total_cost
+                        if pnl != 0:
+                            pnl_color = "green" if pnl > 0 else "red"
+                            st.markdown(f"**Plus/Moins-value:** <span style='color: {pnl_color}'>{pnl:+.2f} {ticker_data['currency']}</span>", unsafe_allow_html=True)
+                    
+                    if st.button("Ajouter au portefeuille"):
+                        success = portfolio_manager.add_stock_to_portfolio(ticker_data, quantity, buying_price)
+                        if success:
+                            st.success("✅ Action ajoutée au portefeuille!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Erreur lors de l'ajout")
                 else:
                     st.error(f"❌ Ticker invalide: {ticker_data.get('error', 'Erreur inconnue')}")
             else:
