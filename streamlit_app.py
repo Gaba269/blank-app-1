@@ -1040,82 +1040,58 @@ class PortfolioManager:
         
         return True
     
-    def update_portfolio_metrics(self):
-        """Met à jour toutes les métriques du portefeuille avec rendements annualisés"""
-        if st.session_state.portfolio_df.empty:
-            return {
-                'total_value': 0, 
-                'portfolio_performance': 0,
-                'annualized_return': 0,
-                'weighted_annualized_return': 0
-            }
-        
-        df = st.session_state.portfolio_df.copy()
-        current_date = datetime.now().date()
-        
-        # Calculs de base
-        total_value = df['amount'].sum()
-        
-        # Éviter la division par zéro
-        if total_value > 0:
-            df['weight'] = df['amount'] / total_value
-            df['weight_pct'] = df['weight'] * 100
-        else:
-            df['weight'] = 0
-            df['weight_pct'] = 0
-        
-        # Calcul des performances simples
-        df['perf'] = ((df['lastPrice'] - df['buyingPrice']) / df['buyingPrice'] * 100).fillna(0)
-        
-        # Calcul des jours de détention pour chaque position
-        df['days_held'] = df['purchase_date'].apply(
-            lambda x: max(1, (current_date - x).days) if pd.notna(x) else 1
-        )
-        
-        # Calcul des rendements annualisés pour chaque position
-        annualized_returns = []
-        for _, row in df.iterrows():
-            initial_val = row['buyingPrice'] * row['quantity']
-            final_val = row['lastPrice'] * row['quantity']
-            days = row['days_held']
-            
-            ann_return = self.calculate_annualized_return(initial_val, final_val, days)
-            annualized_returns.append(ann_return)
-        
-        df['annualized_return'] = annualized_returns
-        
-        # Performance pondérée simple
-        portfolio_perf = (df['weight'] * df['perf']).sum()
-        
-        # Rendement annualisé pondéré du portefeuille
-        weighted_annualized_return = (df['weight'] * df['annualized_return']).sum()
-        
-        # Calcul alternatif : rendement annualisé du portefeuille total
-        total_initial_value = (df['buyingPrice'] * df['quantity']).sum()
-        total_current_value = (df['lastPrice'] * df['quantity']).sum()
-        
-        # Moyenne pondérée des jours de détention
-        weighted_days_held = (df['weight'] * df['days_held']).sum()
-        
-        portfolio_annualized_return = self.calculate_annualized_return(
-            total_initial_value,
-            total_current_value,
-            max(1, int(weighted_days_held))
-        )
-        
-        # Mise à jour du DataFrame dans session_state
-        st.session_state.portfolio_df = df
-        
-        return {
-            'total_value': total_value,
-            'portfolio_performance': portfolio_perf,
-            'annualized_return': portfolio_annualized_return,
-            'weighted_annualized_return': weighted_annualized_return,
-            'total_initial_value': total_initial_value,
-            'total_current_value': total_current_value,
-            'weighted_days_held': weighted_days_held,
-            'annualized_return':annualized_return
+    def add_stock_to_portfolio(self, ticker_data: Dict, quantity: int, buying_price: float = None, purchase_date=None):
+        """Ajoute une action au portefeuille avec prix d'achat personnalisable"""
+    # Utilise le prix d'achat fourni ou le prix actuel par défaut
+        purchase_price = buying_price if buying_price is not None else ticker_data['price']
+
+    # Si pas de date d'achat fournie, utiliser la date actuelle
+        if purchase_date is None:
+            purchase_date = datetime.now().date()
+        elif isinstance(purchase_date, str):
+            try:
+                purchase_date = datetime.strptime(purchase_date, '%Y-%m-%d').date()
+            except ValueError:
+                purchase_date = datetime.now().date()
+
+    # Calculate the number of days held
+        days_held = (datetime.now().date() - purchase_date).days
+
+    # Calculate annualized return
+        annualized_return = self.calculate_annualized_return(purchase_price, ticker_data['price'], days_held)
+
+        new_row = {
+            'name': ticker_data['name'],
+            'symbol': ticker_data['symbol'],
+            'isin': ticker_data.get('isin', 'Unknown'),
+            "purchase_date": purchase_date,
+            'quantity': quantity,
+            'buyingPrice': purchase_price,
+            'lastPrice': ticker_data['price'],
+            'currency': ticker_data.get('currency', 'USD'),
+            'exchange': ticker_data.get('exchange', 'Unknown'),
+            'sector': ticker_data.get('sector', 'Unknown'),
+            'industry': ticker_data.get('industry', 'Unknown'),
+            'asset_type': ticker_data.get('type', 'Stock'),
+            'intradayVariation': 0.0,
+            'amount': quantity * ticker_data['price'],
+            'amountVariation': quantity * (ticker_data['price'] - purchase_price),
+            'variation': ((ticker_data['price'] - purchase_price) / purchase_price * 100) if purchase_price > 0 else 0.0,
+            'Tickers': ticker_data['symbol'],
+            'annualized_return': annualized_return
         }
+
+    # Ajout au DataFrame
+        if st.session_state.portfolio_df.empty:
+            st.session_state.portfolio_df = pd.DataFrame([new_row])
+        else:
+            st.session_state.portfolio_df = pd.concat([
+                st.session_state.portfolio_df,
+                pd.DataFrame([new_row])
+            ], ignore_index=True)
+
+        return True
+
 
     def get_portfolio_annualized_metrics(self) -> Dict:
         """Retourne les métriques annualisées détaillées du portefeuille"""
