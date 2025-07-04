@@ -994,7 +994,7 @@ class PortfolioManager:
         
         return annualized_return * 100  # Retour en pourcentage
 
-    def add_stock_to_portfolio(self, ticker_data: Dict, quantity: int, buying_price: float = None, purchase_date=None):
+    def add_stock_to_portfolio(self, ticker_data: Dict, quantity: int, buying_price: float = None, purchase_date=None,annualized_return=None):
         """Ajoute une action au portefeuille avec prix d'achat personnalisable"""
         # Utilise le prix d'achat fourni ou le prix actuel par défaut
         purchase_price = buying_price if buying_price is not None else ticker_data['price']
@@ -1025,7 +1025,8 @@ class PortfolioManager:
             'amount': quantity * ticker_data['price'],
             'amountVariation': quantity * (ticker_data['price'] - purchase_price),
             'variation': ((ticker_data['price'] - purchase_price) / purchase_price * 100) if purchase_price > 0 else 0.0,
-            'Tickers': ticker_data['symbol']
+            'Tickers': ticker_data['symbol'],
+            'annualized_return':annualized_return
         }
         
         # Ajout au DataFrame
@@ -1112,7 +1113,8 @@ class PortfolioManager:
             'weighted_annualized_return': weighted_annualized_return,
             'total_initial_value': total_initial_value,
             'total_current_value': total_current_value,
-            'weighted_days_held': weighted_days_held
+            'weighted_days_held': weighted_days_held,
+            'annualized_return':annualized_return
         }
 
     def get_portfolio_annualized_metrics(self) -> Dict:
