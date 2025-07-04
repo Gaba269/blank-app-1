@@ -2533,7 +2533,8 @@ def main():
                                    title="Répartition par position (Top 10)")
                     fig_pie.update_layout(height=400)
                     st.plotly_chart(fig_pie, use_container_width=True)
-            
+                else: 
+                    
             with col2:
                 if 'asset_type' in df.columns and 'weight_pct' in df.columns:
                     asset_dist = df.groupby('asset_type')['weight_pct'].sum().reset_index()
