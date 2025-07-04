@@ -2534,6 +2534,7 @@ def main():
                     fig_pie.update_layout(height=400)
                     st.plotly_chart(fig_pie, use_container_width=True)
                 else: 
+                    pass
                     
             with col2:
                 if 'asset_type' in df.columns and 'weight_pct' in df.columns:
@@ -2542,7 +2543,8 @@ def main():
                                      title="Répartition par type d'actif")
                     fig_asset.update_layout(height=400)
                     st.plotly_chart(fig_asset, use_container_width=True)
-        
+                else:
+                    pass
         with tab2:
             st.subheader("🎯 Analyse de diversification")
             
