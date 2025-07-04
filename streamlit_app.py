@@ -2482,7 +2482,8 @@ def main():
                             st.markdown(f"**Plus/Moins-value:** <span style='color: {pnl_color}'>{pnl:+.2f} {ticker_data['currency']}</span>", unsafe_allow_html=True)
                     
                     if st.button("Ajouter au portefeuille"):
-                        
+                        annualized_return = self.calculate_annualized_return(purchase_price, ticker_data['price'], days_held)
+
                         success = portfolio_manager.add_stock_to_portfolio(ticker_data, quantity, buying_price,purchase_date, annualized_return)
                         if success:
                             st.success("✅ Action ajoutée au portefeuille!")
