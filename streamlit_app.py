@@ -994,52 +994,7 @@ class PortfolioManager:
         
         return annualized_return * 100  # Retour en pourcentage
 
-    def add_stock_to_portfolio(self, ticker_data: Dict, quantity: int, buying_price: float = None, purchase_date=None,annualized_return=None):
-        """Ajoute une action au portefeuille avec prix d'achat personnalisable"""
-        # Utilise le prix d'achat fourni ou le prix actuel par défaut
-        purchase_price = buying_price if buying_price is not None else ticker_data['price']
-        
-        # Si pas de date d'achat fournie, utiliser la date actuelle
-        if purchase_date is None:
-            purchase_date = datetime.now().date()
-        elif isinstance(purchase_date, str):
-            try:
-                purchase_date = datetime.strptime(purchase_date, '%Y-%m-%d').date()
-            except ValueError:
-                purchase_date = datetime.now().date()
-        
-        new_row = {
-            'name': ticker_data['name'],
-            'symbol': ticker_data['symbol'],
-            'isin': ticker_data.get('isin', 'Unknown'),
-            "purchase_date": purchase_date,
-            'quantity': quantity,
-            'buyingPrice': purchase_price,
-            'lastPrice': ticker_data['price'],
-            'currency': ticker_data.get('currency', 'USD'),
-            'exchange': ticker_data.get('exchange', 'Unknown'),
-            'sector': ticker_data.get('sector', 'Unknown'),
-            'industry': ticker_data.get('industry', 'Unknown'),
-            'asset_type': ticker_data.get('type', 'Stock'),
-            'intradayVariation': 0.0,
-            'amount': quantity * ticker_data['price'],
-            'amountVariation': quantity * (ticker_data['price'] - purchase_price),
-            'variation': ((ticker_data['price'] - purchase_price) / purchase_price * 100) if purchase_price > 0 else 0.0,
-            'Tickers': ticker_data['symbol'],
-            'annualized_return':annualized_return
-        }
-        
-        # Ajout au DataFrame
-        if st.session_state.portfolio_df.empty:
-            st.session_state.portfolio_df = pd.DataFrame([new_row])
-        else:
-            st.session_state.portfolio_df = pd.concat([
-                st.session_state.portfolio_df, 
-                pd.DataFrame([new_row])
-            ], ignore_index=True)
-        
-        return True
-    
+
     def add_stock_to_portfolio(self, ticker_data: Dict, quantity: int, buying_price: float = None, purchase_date=None,annualized_return=None):
         """Ajoute une action au portefeuille avec prix d'achat personnalisable"""
     # Utilise le prix d'achat fourni ou le prix actuel par défaut
