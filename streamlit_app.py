@@ -1382,7 +1382,8 @@ def enhance_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         'buyingPrice': ['buyingPrice', 'prix_achat', 'purchase_price', 'cost'],
         'lastPrice': ['lastPrice', 'prix_actuel', 'current_price', 'market_price'],
         'isin': ['isin', 'ISIN'],
-        'symbol': ['symbol', 'ticker', 'symbole']
+        'symbol': ['symbol', 'ticker', 'symbole'], 
+        'annualized_return':['annualized_return']
     }
     
     # Standardisation des noms de colonnes
@@ -2550,7 +2551,7 @@ def main():
                             st.markdown(f"**Plus/Moins-value:** <span style='color: {pnl_color}'>{pnl:+.2f} {ticker_data['currency']}</span>", unsafe_allow_html=True)
                     
                     if st.button("Ajouter au portefeuille"):
-                        success = portfolio_manager.add_stock_to_portfolio(ticker_data, quantity, buying_price,purchase_date)
+                        success = portfolio_manager.add_stock_to_portfolio(ticker_data, quantity, buying_price,purchase_date, annualized_return)
                         if success:
                             st.success("✅ Action ajoutée au portefeuille!")
                             st.rerun()
